@@ -23,7 +23,7 @@
           <option value="abraham">Abraham Casas</option>
         </select>
       </label>
-      <p class="hint">Orden recomendado: primero <strong>H1-B</strong> (solo 4 frames, eliges A/B), después <strong>H1-A</strong> (16 frames + gold visible). Los clips no se solapan.</p>
+      <p class="hint">Orden recomendado: primero <strong>H1-B</strong> (F4, escribir mem opcional → A/B), después <strong>H1-A</strong> (F16 + gold). Clips disjuntos.</p>
       <p id="syncStatus" class="sync" data-state="idle"></p>
       <div class="phase-pick">
         <button id="btnStartB" class="btn-primary" type="button">Continuar H1-B · baremo F4</button>
@@ -61,26 +61,51 @@
         <span class="chip muted" id="ids"></span>
       </div>
 
-      <div class="mem">
-        <div class="label">Memoria</div>
+      <!-- H1-A: oracle memory visible for audit -->
+      <div id="oracleMem" class="mem hidden">
+        <div class="label">Memoria (oracle M3 — solo audit H1-A)</div>
         <pre id="memory"></pre>
       </div>
 
-      <div class="stmts">
-        <p class="stmt"><strong>A</strong> <span id="sa"></span></p>
-        <p class="stmt"><strong>B</strong> <span id="sb"></span></p>
-        <p id="goldRow" class="gold hidden">Gold del dataset: <strong id="gold"></strong></p>
+      <!-- H1-B: optional write phase (aligns with main F4: model writes tags) -->
+      <div id="writePanel" class="write-panel hidden">
+        <p class="hint write-intro">
+          Opcional — mismo contrato que train/eval F4: el modelo <strong>no</strong> ve memoria M3;
+          escribe razonamiento + memoria en tags y luego el choice. Puedes dejar vacío y pasar a la pregunta.
+        </p>
+        <label class="field">Razonamiento <code>&lt;think&gt;</code> (opcional)
+          <textarea id="thinkText" rows="4" placeholder="Vacío al inicio. Texto que iría dentro de las etiquetas think."></textarea>
+        </label>
+        <label class="field">Memoria episódica <code>&lt;episodic_memory&gt;</code> (opcional)
+          <textarea id="epiText" rows="4" placeholder="Episodios cronológicos visibles en los frames…"></textarea>
+        </label>
+        <label class="field">Memoria semántica <code>&lt;semantic_memory&gt;</code> (opcional)
+          <textarea id="semText" rows="3" placeholder="Hechos / relaciones estables…"></textarea>
+        </label>
+        <div class="nav write-nav">
+          <button id="btnToQuestion" class="btn-primary" type="button">Avanzar a la pregunta</button>
+        </div>
       </div>
 
-      <div id="actionsA" class="actions hidden">
-        <button data-label="gold_ok" type="button">Gold correcto</button>
-        <button data-label="gold_wrong" type="button">Gold incorrecto</button>
-        <button data-label="unsure" type="button">No estoy seguro</button>
-      </div>
-      <div id="actionsB" class="actions hidden">
-        <button data-choice="A" type="button">Elijo A</button>
-        <button data-choice="B" type="button">Elijo B</button>
-        <button data-choice="unsure" type="button">No estoy seguro</button>
+      <div id="questionPanel" class="question-panel hidden">
+        <div class="stmts">
+          <p class="stmt"><strong>A</strong> <span id="sa"></span></p>
+          <p class="stmt"><strong>B</strong> <span id="sb"></span></p>
+          <p id="goldRow" class="gold hidden">Gold del dataset: <strong id="gold"></strong></p>
+        </div>
+
+        <div id="actionsA" class="actions hidden">
+          <button data-label="gold_ok" type="button">Gold correcto</button>
+          <button data-label="gold_wrong" type="button">Gold incorrecto</button>
+          <button data-label="unsure" type="button">No estoy seguro</button>
+        </div>
+        <div id="actionsB" class="actions hidden">
+          <button data-choice="A" type="button">Elijo A</button>
+          <button data-choice="B" type="button">Elijo B</button>
+          <button data-choice="unsure" type="button">No estoy seguro</button>
+        </div>
+
+        <button id="btnBackWrite" class="btn-soft hidden" type="button">← Volver a editar textos</button>
       </div>
 
       <label id="flagRow" class="flag hidden">

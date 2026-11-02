@@ -117,6 +117,7 @@ body {
 .field select,
 .field input[type="text"],
 .field input[type="password"],
+.field textarea,
 #note {
   font: inherit;
   font-weight: 500;
@@ -127,8 +128,14 @@ body {
   color: var(--ink);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
+.field textarea {
+  resize: vertical;
+  min-height: 4.5rem;
+  line-height: 1.4;
+}
 .field select:focus,
 .field input:focus,
+.field textarea:focus,
 #note:focus {
   outline: none;
   border-color: var(--accent);
@@ -303,6 +310,24 @@ button.secondary:hover {
   border-radius: 12px;
   background: rgba(21, 32, 43, 0.04);
   border: 1px solid var(--line);
+}
+
+.write-panel {
+  margin: 0.75rem 0 1rem;
+  padding: 0.85rem 1rem 1rem;
+  border-radius: 12px;
+  border: 1px dashed rgba(13, 115, 119, 0.35);
+  background: rgba(13, 115, 119, 0.04);
+}
+.write-intro { margin-top: 0; }
+.write-nav { margin-top: 0.35rem; }
+.question-panel { margin-top: 0.5rem; }
+#btnBackWrite { margin: 0.65rem 0 0.25rem; }
+.write-panel code {
+  font-size: 0.82em;
+  background: rgba(21, 32, 43, 0.06);
+  padding: 0.05em 0.3em;
+  border-radius: 4px;
 }
 
 .stmts {

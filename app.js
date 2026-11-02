@@ -9,8 +9,10 @@
   let idx = 0;
   let annotator = "";
   let store = {};
+  /** @type {"write"|"answer"} */
+  let h1bPhase = "write";
   let syncTimer = null;
-  let syncState = "idle"; // idle|pending|ok|err|off
+  let syncState = "idle";
 
   const ANNOTATOR_LABELS = {
     luis: "Luis de la Ossa",
@@ -111,11 +113,50 @@
     return items[idx];
   }
 
+  function readWriteFields() {
+    return {
+      think_text: ($("thinkText").value || "").trim(),
+      episodic_memory_text: ($("epiText").value || "").trim(),
+      semantic_memory_text: ($("semText").value || "").trim(),
+    };
+  }
+
+  function ensureH1BDraft() {
+    const it = current();
+    if (!it || task !== "h1b") return;
+    const prev = store[it.item_id] || {};
+    const w = readWriteFields();
+    store[it.item_id] = {
+      ...prev,
+      task: "h1b",
+      item_id: it.item_id,
+      clip_key: it.clip_key,
+      track: it.track,
+      annotator,
+      think_text: w.think_text,
+      episodic_memory_text: w.episodic_memory_text,
+      semantic_memory_text: w.semantic_memory_text,
+      note: ($("note").value || "").trim(),
+      ui_phase: h1bPhase,
+      ts: new Date().toISOString(),
+    };
+    scheduleSync();
+  }
+
+  function resolveH1bPhase(prev) {
+    if (prev && prev.ui_phase === "answer") return "answer";
+    if (prev && prev.choice) return "answer";
+    return "write";
+  }
+
   function render() {
     const it = current();
     if (!it) return;
     const name = ANNOTATOR_LABELS[annotator] || annotator;
     const done = Object.keys(store).length;
+    const prev = store[it.item_id] || {};
+    const isA = task === "h1a";
+
     $("prog").textContent = `${task.toUpperCase()} · ${idx + 1} / ${items.length} · ${name} · ${done} guardados`;
     const bar = $("progBar");
     if (bar && items.length) {
@@ -127,18 +168,33 @@
     $("sa").textContent = it.statement_a;
     $("sb").textContent = it.statement_b;
 
-    const isA = task === "h1a";
-    $("goldRow").classList.toggle("hidden", !isA);
-    $("actionsA").classList.toggle("hidden", !isA);
-    $("actionsB").classList.toggle("hidden", isA);
-    $("flagRow").classList.toggle("hidden", !isA);
     if (isA) {
+      h1bPhase = "answer";
+      $("oracleMem").classList.remove("hidden");
+      $("writePanel").classList.add("hidden");
+      $("questionPanel").classList.remove("hidden");
+      $("btnBackWrite").classList.add("hidden");
+      $("goldRow").classList.remove("hidden");
+      $("actionsA").classList.remove("hidden");
+      $("actionsB").classList.add("hidden");
+      $("flagRow").classList.remove("hidden");
       $("gold").textContent = it.gold;
       $("taskHint").textContent =
-        "H1-A: con 16 frames + memoria, ¿el gold es correcto? (auditoría del dato). Puedes salir y continuar luego — se guarda en servidor.";
+        "H1-A: con 16 frames + memoria oracle, ¿el gold es correcto? (auditoría del dato).";
     } else {
+      h1bPhase = resolveH1bPhase(prev);
+      $("oracleMem").classList.add("hidden");
+      $("goldRow").classList.add("hidden");
+      $("actionsA").classList.add("hidden");
+      $("flagRow").classList.add("hidden");
+      $("actionsB").classList.remove("hidden");
       $("taskHint").textContent =
-        "H1-B: solo 4 frames + memoria — elige A o B (sin gold). Avance parcial OK; no hace falta terminar de un tirón.";
+        "H1-B (main F4): sin memoria M3. Opcional: escribe think / epi / sem (vacío OK) → Avanzar → elige A/B. Se guarda todo.";
+
+      const showWrite = h1bPhase === "write";
+      $("writePanel").classList.toggle("hidden", !showWrite);
+      $("questionPanel").classList.toggle("hidden", showWrite);
+      $("btnBackWrite").classList.toggle("hidden", showWrite);
     }
 
     const fr = $("frames");
@@ -151,9 +207,11 @@
       fr.appendChild(img);
     });
 
-    const prev = store[it.item_id] || {};
     $("note").value = prev.note || "";
     $("textOnly").checked = !!prev.text_only_guessable;
+    $("thinkText").value = prev.think_text || "";
+    $("epiText").value = prev.episodic_memory_text || "";
+    $("semText").value = prev.semantic_memory_text || "";
 
     document.querySelectorAll("#actionsA button").forEach((b) => {
       b.classList.toggle("active", b.dataset.label === prev.label);
@@ -182,16 +240,24 @@
 
   function setH1B(choice) {
     const it = current();
+    const w = readWriteFields();
+    const prev = store[it.item_id] || {};
     store[it.item_id] = {
+      ...prev,
       task: "h1b",
       item_id: it.item_id,
       clip_key: it.clip_key,
       track: it.track,
       annotator,
+      think_text: w.think_text || prev.think_text || "",
+      episodic_memory_text: w.episodic_memory_text || prev.episodic_memory_text || "",
+      semantic_memory_text: w.semantic_memory_text || prev.semantic_memory_text || "",
       choice,
       note: $("note").value.trim(),
+      ui_phase: "answer",
       ts: new Date().toISOString(),
     };
+    h1bPhase = "answer";
     scheduleSync();
     render();
   }
@@ -256,6 +322,7 @@
       setSyncUi("Sin API — solo este navegador", "off");
     }
     idx = 0;
+    h1bPhase = "write";
     login.classList.add("hidden");
     work.classList.remove("hidden");
     render();
@@ -276,7 +343,6 @@
       const res = await fetch(`${API}/api/export?key=${encodeURIComponent(key)}`);
       const data = await res.json();
       if (!res.ok || data.ok === false) throw new Error(data.error || res.status);
-      // full JSON
       const blob = new Blob([JSON.stringify(data, null, 2)], {
         type: "application/json",
       });
@@ -284,7 +350,6 @@
       a.href = URL.createObjectURL(blob);
       a.download = `H1_export_${(data.exported_at || "").replace(/[:.]/g, "")}.json`;
       a.click();
-      // also each jsonl
       Object.entries(data.jsonl || {}).forEach(([name, text]) => {
         if (!text) return;
         const b = new Blob([text], { type: "application/x-ndjson" });
@@ -293,13 +358,14 @@
         link.download = `annotations_${name}.jsonl`;
         link.click();
       });
-      const bits = (data.annotators &&
-        Object.entries(data.annotators)
-          .map(([a, tasks]) => {
-            const n = Object.values(tasks).reduce((s, t) => s + (t.n || 0), 0);
-            return `${a}:${n}`;
-          })
-          .join(" · ")) ||
+      const bits =
+        (data.annotators &&
+          Object.entries(data.annotators)
+            .map(([a, tasks]) => {
+              const n = Object.values(tasks).reduce((s, t) => s + (t.n || 0), 0);
+              return `${a}:${n}`;
+            })
+            .join(" · ")) ||
         "";
       $("adminMsg").textContent = `OK ${data.exported_at || ""} · ${bits}`;
     } catch (e) {
@@ -318,8 +384,7 @@
       const data = await res.json();
       if (!res.ok) throw new Error(String(res.status));
       const total = (data.rows || []).reduce((s, r) => s + (r.n || 0), 0);
-      if (el)
-        el.textContent = `API ${API} · ${total} anotaciones en servidor`;
+      if (el) el.textContent = `API ${API} · ${total} anotaciones en servidor`;
     } catch (e) {
       if (el)
         el.textContent = `API ${API} no responde — arranca sync_server.py o revisa Worker`;
@@ -333,6 +398,23 @@
     login.classList.remove("hidden");
     pingStatus();
   };
+
+  $("btnToQuestion").onclick = () => {
+    h1bPhase = "answer";
+    ensureH1BDraft();
+    render();
+  };
+  $("btnBackWrite").onclick = () => {
+    h1bPhase = "write";
+    ensureH1BDraft();
+    render();
+  };
+
+  ["thinkText", "epiText", "semText"].forEach((id) => {
+    $(id).addEventListener("change", () => {
+      if (task === "h1b") ensureH1BDraft();
+    });
+  });
 
   document.querySelectorAll("#actionsA button").forEach((b) => {
     b.onclick = () => setH1A(b.dataset.label);
@@ -356,10 +438,12 @@
     scheduleSync();
   };
   $("btnPrev").onclick = () => {
+    if (task === "h1b") ensureH1BDraft();
     idx = Math.max(0, idx - 1);
     render();
   };
   $("btnNext").onclick = () => {
+    if (task === "h1b") ensureH1BDraft();
     idx = Math.min(items.length - 1, idx + 1);
     render();
   };
