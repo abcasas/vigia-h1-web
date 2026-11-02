@@ -165,11 +165,13 @@ export default {
         const a = String(body.annotator || "");
         const t = String(body.task || "");
         const records = body.records;
-        if (!ANNOTATORS.has(a) || !TASKS.has(t) || typeof records !== "object") {
+        const replace = !!body.replace;
+        if (!ANNOTATORS.has(a) || !TASKS.has(t) || typeof records !== "object" || records === null) {
           return json({ ok: false, error: "annotator/task/records inválidos" }, 400);
         }
         const { doc, sha } = await loadDoc(env, a, t);
-        const merged = mergeRecords(doc.records || {}, records);
+        // replace=true → full overwrite (used to wipe stale smoke annotations)
+        const merged = replace ? { ...records } : mergeRecords(doc.records || {}, records);
         const next = {
           annotator: a,
           task: t,
@@ -183,6 +185,7 @@ export default {
           task: t,
           n_items: Object.keys(merged).length,
           updated_at: next.updated_at,
+          replaced: replace,
         });
       }
 

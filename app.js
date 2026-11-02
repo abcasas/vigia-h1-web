@@ -2,6 +2,9 @@
   const DATA_URL = "public/data/items.json";
   const CFG = window.H1_CONFIG || {};
   const API = (CFG.apiBase || "").replace(/\/$/, "");
+  /** Bump to abandon stale localStorage from early smoke tests */
+  const STORE_VER = "v2";
+  const WIPE_FLAG = "vigia_baremo_f4_wiped_v2";
 
   let pack = null;
   let items = [];
@@ -9,10 +12,9 @@
   let idx = 0;
   let annotator = "";
   let store = {};
-  /** @type {"write"|"answer"} */
-  let h1bPhase = "write";
+  /** Baremo F4: question panel visibility (never restored from disk) */
+  let showQuestion = false;
   let syncTimer = null;
-  let syncState = "idle";
 
   const ANNOTATOR_LABELS = {
     luis: "Luis de la Ossa",
@@ -25,8 +27,7 @@
     h1b: "Baremo humano · F4",
   };
 
-  // Canonical main F4 contract from vigia_campana_limpia/prompts.py (SYSTEM_PROMPT_EPI_FULL + frames4 user scaffold).
-  // Comment: that module is episodic today; semantic dual uses same tag slots with <semantic_memory>.
+  // Canonical main F4 from vigia_campana_limpia/prompts.py
   const CONTRACT_PROMPT_F4 = [
     "=== SYSTEM (SYSTEM_PROMPT_EPI_FULL) ===",
     "You are an expert that watches a 30-second video clip from four key frames and answers one closed A/B contrastive question about episodic content.",
@@ -39,7 +40,7 @@
     "Do not use video identifiers or filenames to invent content.",
     "Do not call tools.",
     "",
-    "=== USER scaffold (frames4 · question text appears only after you advance) ===",
+    "=== USER scaffold (frames4 · A/B text only after Mostrar pregunta) ===",
     "Produce tagged episodic memory for this clip from the frames, then answer the question.",
     "### Episodic contrastive question",
     "<stem>",
@@ -53,18 +54,11 @@
   const login = $("login");
   const work = $("work");
 
-  function goHome() {
-    work.classList.add("hidden");
-    login.classList.remove("hidden");
-    pingStatus();
-  }
-
   function key() {
-    return `vigia_${task}_${annotator}`;
+    return `vigia_${STORE_VER}_${task}_${annotator}`;
   }
 
   function setSyncUi(msg, state) {
-    syncState = state;
     const el = $("syncStatus");
     if (el) {
       el.textContent = msg;
@@ -106,12 +100,13 @@
     return res.json();
   }
 
-  async function apiSave() {
+  async function apiSave(opts = {}) {
     if (!API) {
       setSyncUi("Solo localStorage (sin API)", "off");
       return;
     }
-    setSyncUi("Guardando en servidor…", "pending");
+    const replace = !!opts.replace;
+    setSyncUi(replace ? "Limpiando servidor…" : "Guardando en servidor…", "pending");
     try {
       const res = await fetch(`${API}/api/save`, {
         method: "POST",
@@ -120,12 +115,16 @@
           annotator,
           task,
           records: store,
+          replace,
           client_ts: new Date().toISOString(),
         }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || res.status);
-      setSyncUi(`Sincronizado · ${data.n_items} ítems · ${data.updated_at || ""}`, "ok");
+      setSyncUi(
+        `Sincronizado · ${data.n_items} ítems · ${data.updated_at || ""}${replace ? " (replace)" : ""}`,
+        "ok"
+      );
     } catch (e) {
       setSyncUi(`Error sync: ${e.message || e} (sigue en este navegador)`, "err");
     }
@@ -172,17 +171,15 @@
       episodic_memory_text: w.episodic_memory_text,
       semantic_memory_text: w.semantic_memory_text,
       note: ($("note").value || "").trim(),
-      ui_phase: h1bPhase,
       ts: new Date().toISOString(),
     };
     scheduleSync();
   }
 
-  function resolveH1bPhase(prev) {
-    // Only show the question after explicit "Avanzar" (ui_phase) or if already answered.
-    if (prev && prev.ui_phase === "answer") return "answer";
-    if (prev && prev.choice) return "answer";
-    return "write";
+  function syncToggleLabel() {
+    const btn = $("btnToggleQuestion");
+    if (!btn) return;
+    btn.textContent = showQuestion ? "Ocultar pregunta" : "Mostrar pregunta";
   }
 
   function render() {
@@ -208,19 +205,16 @@
     const cp = $("contractPrompt");
     if (cp) cp.textContent = CONTRACT_PROMPT_F4;
 
-    // Default: hide write/oracle/question; then open only what this task needs.
     $("oracleMem").classList.add("hidden");
     $("writePanel").classList.add("hidden");
     $("questionPanel").classList.add("hidden");
-    $("btnBackWrite").classList.add("hidden");
     $("actionsA").classList.add("hidden");
     $("actionsB").classList.add("hidden");
     $("goldRow").classList.add("hidden");
     $("flagRow").classList.add("hidden");
 
     if (isA) {
-      // Gold audit only: frames + oracle mem + A/B statements + gold labels. NO write panel.
-      h1bPhase = "answer";
+      showQuestion = true;
       $("oracleMem").classList.remove("hidden");
       $("questionPanel").classList.remove("hidden");
       $("actionsA").classList.remove("hidden");
@@ -230,16 +224,14 @@
       $("taskHint").textContent =
         "Auditoría gold: 16 frames + memoria oracle. ¿El gold del dataset es correcto?";
     } else {
-      h1bPhase = resolveH1bPhase(prev);
+      // Baremo F4: ALWAYS show write panel; question only if toggled this item.
+      $("writePanel").classList.remove("hidden");
       $("taskHint").textContent =
-        "Baremo F4 (como train/eval main): sin memoria oracle. Textos opcionales → Avanzar → A/B.";
-
-      if (h1bPhase === "write") {
-        $("writePanel").classList.remove("hidden");
-      } else {
+        "Baremo F4: sin memoria oracle. Escribe textos (opcional) y usa «Mostrar pregunta». Al cambiar de ítem la pregunta se oculta otra vez.";
+      syncToggleLabel();
+      if (showQuestion) {
         $("questionPanel").classList.remove("hidden");
         $("actionsB").classList.remove("hidden");
-        $("btnBackWrite").classList.remove("hidden");
       }
     }
 
@@ -300,10 +292,9 @@
       semantic_memory_text: w.semantic_memory_text || prev.semantic_memory_text || "",
       choice,
       note: $("note").value.trim(),
-      ui_phase: "answer",
       ts: new Date().toISOString(),
     };
-    h1bPhase = "answer";
+    showQuestion = true;
     scheduleSync();
     render();
   }
@@ -336,6 +327,44 @@
     return pack;
   }
 
+  /** One-time wipe of stale baremo F4 annotations (local + server replace for all annotators). */
+  async function wipeBaremoF4IfNeeded() {
+    if (localStorage.getItem(WIPE_FLAG)) return;
+    store = {};
+    saveStoreLocal();
+    ["luis", "jesus", "abraham"].forEach((a) => {
+      try {
+        localStorage.removeItem(`vigia_h1b_${a}`);
+        localStorage.removeItem(`vigia_v2_h1b_${a}`);
+      } catch (_) {}
+    });
+    if (API) {
+      for (const a of ["luis", "jesus", "abraham"]) {
+        try {
+          const res = await fetch(`${API}/api/save`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              annotator: a,
+              task: "h1b",
+              records: {},
+              replace: true,
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) throw new Error(data.error || res.status);
+        } catch (e) {
+          console.warn("wipe h1b failed for", a, e);
+          setSyncUi(
+            `Wipe parcial: redeploy Worker con worker.js nuevo (replace). ${e.message || e}`,
+            "err"
+          );
+        }
+      }
+    }
+    localStorage.setItem(WIPE_FLAG, new Date().toISOString());
+  }
+
   async function start(phase) {
     annotator = $("annotator").value;
     if (!annotator) {
@@ -350,28 +379,53 @@
       alert(`Sin ítems para ${phase}`);
       return;
     }
-    loadStoreLocal();
-    if (API) {
-      setSyncUi("Cargando avance del servidor…", "pending");
-      try {
-        const remote = await apiLoad();
-        store = mergeByTs(store, remote.records || {});
-        saveStoreLocal();
-        setSyncUi(
-          `Servidor OK · ${Object.keys(store).length} ítems (merge local)`,
-          "ok"
-        );
-      } catch (e) {
-        setSyncUi(`Sin servidor (${e.message}); usando local`, "err");
+
+    if (phase === "h1b") {
+      await wipeBaremoF4IfNeeded();
+      loadStoreLocal();
+      // After wipe, do not re-merge old remote unless wipe failed (empty store OK)
+      if (API && Object.keys(store).length === 0 && localStorage.getItem(WIPE_FLAG)) {
+        // already wiped / empty — skip loading stale remote into UI
+        setSyncUi("Baremo F4 limpio (datos smoke antiguos descartados)", "ok");
+      } else if (API) {
+        try {
+          const remote = await apiLoad();
+          store = mergeByTs(store, remote.records || {});
+          saveStoreLocal();
+          setSyncUi(`Servidor OK · ${Object.keys(store).length} ítems`, "ok");
+        } catch (e) {
+          setSyncUi(`Sin servidor (${e.message}); usando local`, "err");
+        }
       }
     } else {
-      setSyncUi("Sin API — solo este navegador", "off");
+      loadStoreLocal();
+      if (API) {
+        setSyncUi("Cargando avance del servidor…", "pending");
+        try {
+          const remote = await apiLoad();
+          store = mergeByTs(store, remote.records || {});
+          saveStoreLocal();
+          setSyncUi(`Servidor OK · ${Object.keys(store).length} ítems`, "ok");
+        } catch (e) {
+          setSyncUi(`Sin servidor (${e.message}); usando local`, "err");
+        }
+      } else {
+        setSyncUi("Sin API — solo este navegador", "off");
+      }
     }
+
     idx = 0;
-    h1bPhase = "write";
+    showQuestion = phase === "h1a";
     login.classList.add("hidden");
     work.classList.remove("hidden");
     render();
+  }
+
+  function goHome() {
+    work.classList.add("hidden");
+    login.classList.remove("hidden");
+    showQuestion = false;
+    pingStatus();
   }
 
   async function adminExport() {
@@ -404,16 +458,7 @@
         link.download = `annotations_${name}.jsonl`;
         link.click();
       });
-      const bits =
-        (data.annotators &&
-          Object.entries(data.annotators)
-            .map(([a, tasks]) => {
-              const n = Object.values(tasks).reduce((s, t) => s + (t.n || 0), 0);
-              return `${a}:${n}`;
-            })
-            .join(" · ")) ||
-        "";
-      $("adminMsg").textContent = `OK ${data.exported_at || ""} · ${bits}`;
+      $("adminMsg").textContent = `OK ${data.exported_at || ""}`;
     } catch (e) {
       $("adminMsg").textContent = `Error: ${e.message || e}`;
     }
@@ -433,7 +478,7 @@
       if (el) el.textContent = `API ${API} · ${total} anotaciones en servidor`;
     } catch (e) {
       if (el)
-        el.textContent = `API ${API} no responde — arranca sync_server.py o revisa Worker`;
+        el.textContent = `API ${API} no responde — revisa Worker`;
     }
   }
 
@@ -442,14 +487,9 @@
   $("btnHome").onclick = goHome;
   if ($("brandHome")) $("brandHome").onclick = goHome;
 
-  $("btnToQuestion").onclick = () => {
-    h1bPhase = "answer";
-    ensureH1BDraft();
-    render();
-  };
-  $("btnBackWrite").onclick = () => {
-    h1bPhase = "write";
-    ensureH1BDraft();
+  $("btnToggleQuestion").onclick = () => {
+    showQuestion = !showQuestion;
+    if (task === "h1b") ensureH1BDraft();
     render();
   };
 
@@ -481,12 +521,18 @@
     scheduleSync();
   };
   $("btnPrev").onclick = () => {
-    if (task === "h1b") ensureH1BDraft();
+    if (task === "h1b") {
+      ensureH1BDraft();
+      showQuestion = false; // always hide question when changing item
+    }
     idx = Math.max(0, idx - 1);
     render();
   };
   $("btnNext").onclick = () => {
-    if (task === "h1b") ensureH1BDraft();
+    if (task === "h1b") {
+      ensureH1BDraft();
+      showQuestion = false;
+    }
     idx = Math.min(items.length - 1, idx + 1);
     render();
   };
