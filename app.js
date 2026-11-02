@@ -628,5 +628,68 @@
   $("btnSyncNow").onclick = () => apiSave();
   $("btnAdminExport").onclick = adminExport;
 
+  async function adminWipe() {
+    if (!API) {
+      alert("Sin API");
+      return;
+    }
+    const key = $("adminKey").value.trim();
+    if (!key) {
+      alert("Introduce la clave admin");
+      return;
+    }
+    const scope = ($("wipeScope") && $("wipeScope").value) || "baremo";
+    const label =
+      scope === "audit"
+        ? "auditoría gold"
+        : scope === "all"
+          ? "TODAS las anotaciones (baremo + auditoría)"
+          : "baremo F4";
+    const ok1 = window.confirm(
+      `¿Resetear ${label} para los 3 anotadores en el servidor?\n\nEsto no se puede deshacer (salvo un export previo).`
+    );
+    if (!ok1) return;
+    const typed = window.prompt(
+      `Segunda confirmación: escribe exactamente RESET para borrar ${label}.`
+    );
+    if (typed !== "RESET") {
+      $("adminMsg").textContent = "Cancelado (no escribiste RESET).";
+      return;
+    }
+    $("adminMsg").textContent = "Reseteando…";
+    try {
+      const res = await fetch(`${API}/api/wipe`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Key": key,
+        },
+        body: JSON.stringify({ key, scope }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.ok === false) throw new Error(data.error || res.status);
+      // Clear local caches for this browser
+      ["luis", "jesus", "abraham"].forEach((a) => {
+        ["h1a", "h1b"].forEach((t) => {
+          try {
+            localStorage.removeItem(`vigia_${STORE_VER}_${t}_${a}`);
+            localStorage.removeItem(`vigia_v2_${t}_${a}`);
+            localStorage.removeItem(`vigia_${t}_${a}`);
+          } catch (_) {}
+        });
+      });
+      try {
+        localStorage.removeItem(WIPE_FLAG);
+      } catch (_) {}
+      store = {};
+      $("adminMsg").textContent = `OK reset ${scope} · ${((data.cleared || []).length)} archivos · ${data.updated_at || ""}`;
+      pingStatus();
+    } catch (e) {
+      $("adminMsg").textContent = `Error wipe: ${e.message || e}. Si 404, redeploy Worker con /api/wipe.`;
+    }
+  }
+
+  if ($("btnAdminWipe")) $("btnAdminWipe").onclick = adminWipe;
+
   pingStatus();
 })();

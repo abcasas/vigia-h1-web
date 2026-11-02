@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>VIGIA · Human evaluation (dataset tester)</title>
-  <link rel="stylesheet" href="styles.css?v=5" />
+  <link rel="stylesheet" href="styles.css?v=6" />
 </head>
 <body>
   <div class="shell">
@@ -33,11 +33,21 @@
 
     <section id="admin" class="panel">
       <h2 class="h2">Admin</h2>
-      <p class="hint">Descarga el estado de los tres anotadores (JSON + JSONL).</p>
+      <p class="hint">Export y reset (borra anotaciones en el servidor). Requiere <code>ADMIN_KEY</code> del Worker.</p>
       <label class="field">Clave admin
         <input type="password" id="adminKey" placeholder="ADMIN_KEY" autocomplete="off" />
       </label>
-      <button id="btnAdminExport" class="btn-soft" type="button">Descargar export total</button>
+      <div class="phase-pick">
+        <button id="btnAdminExport" class="btn-soft" type="button">Descargar export total</button>
+      </div>
+      <label class="field">Resetear anotaciones
+        <select id="wipeScope">
+          <option value="baremo">Solo baremo F4</option>
+          <option value="audit">Solo auditoría gold</option>
+          <option value="all">Todo (baremo + auditoría)</option>
+        </select>
+      </label>
+      <button id="btnAdminWipe" class="btn-soft" type="button" style="border-color:#b33a3a;color:#b33a3a">Resetear (doble confirmación)</button>
       <p id="adminMsg" class="hint"></p>
     </section>
 
@@ -108,7 +118,7 @@
     </section>
   </div>
 
-  <script src="config.js?v=5"></script>
-  <script src="app.js?v=5"></script>
+  <script src="config.js?v=6"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

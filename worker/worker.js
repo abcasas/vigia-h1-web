@@ -189,6 +189,37 @@ export default {
         });
       }
 
+      // Admin wipe: empty records for selected tasks (all annotators)
+      if (request.method === "POST" && (path === "/api/wipe" || path === "/wipe")) {
+        const body = await request.json().catch(() => ({}));
+        const key = body.key || request.headers.get("X-Admin-Key") || "";
+        if (key !== env.ADMIN_KEY) {
+          return json({ ok: false, error: "admin key inválida" }, 403);
+        }
+        const scope = String(body.scope || "all"); // baremo|audit|all
+        let tasks = [];
+        if (scope === "baremo" || scope === "h1b") tasks = ["h1b"];
+        else if (scope === "audit" || scope === "h1a") tasks = ["h1a"];
+        else if (scope === "all") tasks = ["h1a", "h1b"];
+        else return json({ ok: false, error: "scope inválido (baremo|audit|all)" }, 400);
+
+        const cleared = [];
+        for (const a of ANNOTATORS) {
+          for (const t of tasks) {
+            const { sha } = await loadDoc(env, a, t);
+            const next = {
+              annotator: a,
+              task: t,
+              records: {},
+              updated_at: nowIso(),
+            };
+            await ghPut(env, filePath(a, t), next, sha);
+            cleared.push(`${a}_${t}`);
+          }
+        }
+        return json({ ok: true, scope, cleared, updated_at: nowIso() });
+      }
+
       return json({ ok: false, error: "not found" }, 404);
     } catch (e) {
       return json({ ok: false, error: String(e.message || e) }, 500);
