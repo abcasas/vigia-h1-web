@@ -2,18 +2,17 @@
   const DATA_URL = "public/data/items.json";
   const CFG = window.H1_CONFIG || {};
   const API = (CFG.apiBase || "").replace(/\/$/, "");
-  /** Bump to abandon stale localStorage from early smoke tests */
-  const STORE_VER = "v2";
-  const WIPE_FLAG = "vigia_baremo_f4_wiped_v2";
+  const STORE_VER = "v3";
+  const WIPE_FLAG = "vigia_baremo_f4_wiped_v3";
 
   let pack = null;
-  let items = [];
+  /** @type {{clip_key:string, video_id:string, clip_id:any, scene:string, frames:string[], memory:string, epi:object|null, sem:object|null}[]} */
+  let clips = [];
   let task = "";
   let idx = 0;
   let annotator = "";
   let store = {};
-  /** Baremo F4: question panel visibility (never restored from disk) */
-  let showQuestion = false;
+  let showQuestions = false;
   let syncTimer = null;
 
   const ANNOTATOR_LABELS = {
@@ -27,7 +26,6 @@
     h1b: "Baremo humano · F4",
   };
 
-  // Canonical main F4 from vigia_campana_limpia/prompts.py
   const CONTRACT_PROMPT_F4 = [
     "=== SYSTEM (SYSTEM_PROMPT_EPI_FULL) ===",
     "You are an expert that watches a 30-second video clip from four key frames and answers one closed A/B contrastive question about episodic content.",
@@ -40,14 +38,13 @@
     "Do not use video identifiers or filenames to invent content.",
     "Do not call tools.",
     "",
-    "=== USER scaffold (frames4 · A/B text only after Mostrar pregunta) ===",
+    "=== USER scaffold (frames4) ===",
     "Produce tagged episodic memory for this clip from the frames, then answer the question.",
     "### Episodic contrastive question",
-    "<stem>",
-    "A) <statement_a>",
-    "B) <statement_b>",
+    "<stem> / A) … / B) …",
     "After memory, output <choice>A</choice> or <choice>B</choice>.",
-    "Do not output choice_sem.",
+    "",
+    "Note: dual track uses the same frames; semantic answers use <semantic_memory> in the same spirit.",
   ].join("\n");
 
   const $ = (id) => document.getElementById(id);
@@ -59,16 +56,12 @@
   }
 
   function setSyncUi(msg, state) {
-    const el = $("syncStatus");
-    if (el) {
+    ["syncStatus", "syncStatusWork"].forEach((id) => {
+      const el = $(id);
+      if (!el) return;
       el.textContent = msg;
       el.dataset.state = state;
-    }
-    const elw = $("syncStatusWork");
-    if (elw) {
-      elw.textContent = msg;
-      elw.dataset.state = state;
-    }
+    });
   }
 
   function loadStoreLocal() {
@@ -92,6 +85,55 @@
     return out;
   }
 
+  function groupClips(itemList) {
+    const map = new Map();
+    (itemList || []).forEach((it) => {
+      const ck = it.clip_key || `${it.video_id}_c${it.clip_id}`;
+      if (!map.has(ck)) {
+        map.set(ck, {
+          clip_key: ck,
+          video_id: it.video_id,
+          clip_id: it.clip_id,
+          scene: it.scene,
+          frames: it.frames || [],
+          memory: it.memory || "",
+          epi: null,
+          sem: null,
+        });
+      }
+      const g = map.get(ck);
+      if ((it.frames || []).length > (g.frames || []).length) g.frames = it.frames;
+      if (it.memory) g.memory = it.memory;
+      const tr = String(it.track || "").toLowerCase();
+      if (tr.startsWith("epi")) g.epi = it;
+      else if (tr.startsWith("sem")) g.sem = it;
+    });
+    return Array.from(map.values());
+  }
+
+  function currentClip() {
+    return clips[idx];
+  }
+
+  function tracksOf(clip) {
+    return [clip.epi, clip.sem].filter(Boolean);
+  }
+
+  function clipDoneCount() {
+    let n = 0;
+    clips.forEach((c) => {
+      const ts = tracksOf(c);
+      if (!ts.length) return;
+      const ok = ts.every((it) => {
+        const r = store[it.item_id];
+        if (!r) return false;
+        return task === "h1a" ? !!r.label : !!r.choice;
+      });
+      if (ok) n += 1;
+    });
+    return n;
+  }
+
   async function apiLoad() {
     if (!API) return null;
     const url = `${API}/api/load?annotator=${encodeURIComponent(annotator)}&task=${encodeURIComponent(task)}`;
@@ -106,7 +148,7 @@
       return;
     }
     const replace = !!opts.replace;
-    setSyncUi(replace ? "Limpiando servidor…" : "Guardando en servidor…", "pending");
+    setSyncUi(replace ? "Limpiando servidor…" : "Guardando…", "pending");
     try {
       const res = await fetch(`${API}/api/save`, {
         method: "POST",
@@ -121,30 +163,21 @@
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || res.status);
-      setSyncUi(
-        `Sincronizado · ${data.n_items} ítems · ${data.updated_at || ""}${replace ? " (replace)" : ""}`,
-        "ok"
-      );
+      setSyncUi(`Sincronizado · ${data.n_items} ítems`, "ok");
     } catch (e) {
-      setSyncUi(`Error sync: ${e.message || e} (sigue en este navegador)`, "err");
+      setSyncUi(`Error sync: ${e.message || e}`, "err");
     }
   }
 
   function scheduleSync() {
     saveStoreLocal();
     if (!API) {
-      setSyncUi("Solo localStorage — configura API en config.js", "off");
+      setSyncUi("Solo localStorage", "off");
       return;
     }
     setSyncUi("Pendiente de sync…", "pending");
     clearTimeout(syncTimer);
-    syncTimer = setTimeout(() => {
-      apiSave();
-    }, 450);
-  }
-
-  function current() {
-    return items[idx];
+    syncTimer = setTimeout(() => apiSave(), 450);
   }
 
   function readWriteFields() {
@@ -152,55 +185,172 @@
       think_text: ($("thinkText").value || "").trim(),
       episodic_memory_text: ($("epiText").value || "").trim(),
       semantic_memory_text: ($("semText").value || "").trim(),
+      note: ($("note").value || "").trim(),
     };
   }
 
-  function ensureH1BDraft() {
-    const it = current();
-    if (!it || task !== "h1b") return;
-    const prev = store[it.item_id] || {};
+  /** Persist shared write fields onto every track item of this clip. */
+  function ensureClipDraft() {
+    const clip = currentClip();
+    if (!clip || task !== "h1b") return;
     const w = readWriteFields();
-    store[it.item_id] = {
-      ...prev,
-      task: "h1b",
-      item_id: it.item_id,
-      clip_key: it.clip_key,
-      track: it.track,
-      annotator,
-      think_text: w.think_text,
-      episodic_memory_text: w.episodic_memory_text,
-      semantic_memory_text: w.semantic_memory_text,
-      note: ($("note").value || "").trim(),
-      ts: new Date().toISOString(),
-    };
+    const ts = new Date().toISOString();
+    tracksOf(clip).forEach((it) => {
+      const prev = store[it.item_id] || {};
+      store[it.item_id] = {
+        ...prev,
+        task: "h1b",
+        item_id: it.item_id,
+        clip_key: clip.clip_key,
+        track: it.track,
+        annotator,
+        think_text: w.think_text,
+        episodic_memory_text: w.episodic_memory_text,
+        semantic_memory_text: w.semantic_memory_text,
+        note: w.note,
+        ts,
+      };
+    });
     scheduleSync();
   }
 
   function syncToggleLabel() {
     const btn = $("btnToggleQuestion");
-    if (!btn) return;
-    btn.textContent = showQuestion ? "Ocultar pregunta" : "Mostrar pregunta";
+    if (btn) btn.textContent = showQuestions ? "Ocultar preguntas" : "Mostrar preguntas";
+  }
+
+  function setTrackChoice(itemId, choice) {
+    const clip = currentClip();
+    const it = tracksOf(clip).find((x) => x.item_id === itemId);
+    if (!it) return;
+    const w = readWriteFields();
+    const prev = store[itemId] || {};
+    store[itemId] = {
+      ...prev,
+      task: "h1b",
+      item_id: itemId,
+      clip_key: clip.clip_key,
+      track: it.track,
+      annotator,
+      think_text: w.think_text || prev.think_text || "",
+      episodic_memory_text: w.episodic_memory_text || prev.episodic_memory_text || "",
+      semantic_memory_text: w.semantic_memory_text || prev.semantic_memory_text || "",
+      choice,
+      note: w.note,
+      ts: new Date().toISOString(),
+    };
+    // keep sibling draft texts in sync
+    ensureClipDraft();
+    scheduleSync();
+    render();
+  }
+
+  function setTrackLabel(itemId, label) {
+    const clip = currentClip();
+    const it = tracksOf(clip).find((x) => x.item_id === itemId);
+    if (!it) return;
+    const prev = store[itemId] || {};
+    store[itemId] = {
+      ...prev,
+      task: "h1a",
+      item_id: itemId,
+      clip_key: clip.clip_key,
+      track: it.track,
+      annotator,
+      label,
+      text_only_guessable: $("textOnly").checked,
+      note: ($("note").value || "").trim(),
+      ts: new Date().toISOString(),
+    };
+    scheduleSync();
+    render();
+  }
+
+  function buildQuestionBlocks(clip) {
+    const panel = $("questionPanel");
+    panel.innerHTML = "";
+    tracksOf(clip).forEach((it) => {
+      const prev = store[it.item_id] || {};
+      const trackName = String(it.track || "").toLowerCase().startsWith("sem")
+        ? "Semantic"
+        : "Episodic";
+      const block = document.createElement("div");
+      block.className = "q-block";
+      block.innerHTML = `
+        <div class="q-head"><span class="chip">${trackName}</span>
+          <span class="chip muted">${it.item_id}</span></div>
+        <div class="stmts">
+          <p class="stmt"><strong>A</strong> ${escapeHtml(it.statement_a || "")}</p>
+          <p class="stmt"><strong>B</strong> ${escapeHtml(it.statement_b || "")}</p>
+          ${
+            task === "h1a"
+              ? `<p class="gold">Gold: <strong>${escapeHtml(String(it.gold || ""))}</strong></p>`
+              : ""
+          }
+        </div>
+        <div class="actions" data-item="${escapeAttr(it.item_id)}"></div>
+      `;
+      const actions = block.querySelector(".actions");
+      if (task === "h1a") {
+        [
+          ["gold_ok", "Gold correcto"],
+          ["gold_wrong", "Gold incorrecto"],
+          ["unsure", "No estoy seguro"],
+        ].forEach(([val, lab]) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.textContent = lab;
+          b.dataset.label = val;
+          if (prev.label === val) b.classList.add("active");
+          b.onclick = () => setTrackLabel(it.item_id, val);
+          actions.appendChild(b);
+        });
+      } else {
+        [
+          ["A", "Elijo A"],
+          ["B", "Elijo B"],
+          ["unsure", "No estoy seguro"],
+        ].forEach(([val, lab]) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.textContent = lab;
+          b.dataset.choice = val;
+          if (prev.choice === val) b.classList.add("active");
+          b.onclick = () => setTrackChoice(it.item_id, val);
+          actions.appendChild(b);
+        });
+      }
+      panel.appendChild(block);
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+  function escapeAttr(s) {
+    return escapeHtml(s).replace(/'/g, "&#39;");
   }
 
   function render() {
-    const it = current();
-    if (!it) return;
+    const clip = currentClip();
+    if (!clip) return;
     const name = ANNOTATOR_LABELS[annotator] || annotator;
-    const done = Object.keys(store).length;
-    const prev = store[it.item_id] || {};
+    const done = clipDoneCount();
     const isA = task === "h1a";
     const taskLabel = TASK_LABELS[task] || task;
 
-    $("prog").textContent = `${taskLabel} · ${idx + 1} / ${items.length} · ${name} · ${done} guardados`;
+    $("prog").textContent = `${taskLabel} · clip ${idx + 1} / ${clips.length} · ${name} · ${done} clips listos`;
     const bar = $("progBar");
-    if (bar && items.length) {
-      bar.style.width = `${Math.round(((idx + 1) / items.length) * 100)}%`;
+    if (bar && clips.length) {
+      bar.style.width = `${Math.round(((idx + 1) / clips.length) * 100)}%`;
     }
-    $("track").textContent = it.track;
-    $("ids").textContent = `${it.video_id} c${it.clip_id} · ${it.item_id}`;
-    $("memory").textContent = it.memory || "(vacío)";
-    $("sa").textContent = it.statement_a;
-    $("sb").textContent = it.statement_b;
+    $("ids").textContent = `${clip.clip_key} · ${clip.scene || ""} · tracks: ${tracksOf(clip)
+      .map((t) => t.track)
+      .join("+")}`;
 
     const cp = $("contractPrompt");
     if (cp) cp.textContent = CONTRACT_PROMPT_F4;
@@ -208,95 +358,48 @@
     $("oracleMem").classList.add("hidden");
     $("writePanel").classList.add("hidden");
     $("questionPanel").classList.add("hidden");
-    $("actionsA").classList.add("hidden");
-    $("actionsB").classList.add("hidden");
-    $("goldRow").classList.add("hidden");
     $("flagRow").classList.add("hidden");
-
-    if (isA) {
-      showQuestion = true;
-      $("oracleMem").classList.remove("hidden");
-      $("questionPanel").classList.remove("hidden");
-      $("actionsA").classList.remove("hidden");
-      $("goldRow").classList.remove("hidden");
-      $("flagRow").classList.remove("hidden");
-      $("gold").textContent = it.gold;
-      $("taskHint").textContent =
-        "Auditoría gold: 16 frames + memoria oracle. ¿El gold del dataset es correcto?";
-    } else {
-      // Baremo F4: ALWAYS show write panel; question only if toggled this item.
-      $("writePanel").classList.remove("hidden");
-      $("taskHint").textContent =
-        "Baremo F4: sin memoria oracle. Escribe textos (opcional) y usa «Mostrar pregunta». Al cambiar de ítem la pregunta se oculta otra vez.";
-      syncToggleLabel();
-      if (showQuestion) {
-        $("questionPanel").classList.remove("hidden");
-        $("actionsB").classList.remove("hidden");
-      }
-    }
 
     const fr = $("frames");
     fr.innerHTML = "";
     fr.className = isA ? "frames frames16" : "frames";
-    (it.frames || []).forEach((rel) => {
+    (clip.frames || []).forEach((rel) => {
       const img = document.createElement("img");
       img.src = `public/data/${rel}`;
       img.alt = rel;
       fr.appendChild(img);
     });
 
+    // Prefill shared fields from epi record (or sem)
+    const seedIt = clip.epi || clip.sem;
+    const prev = (seedIt && store[seedIt.item_id]) || {};
     $("note").value = prev.note || "";
     $("textOnly").checked = !!prev.text_only_guessable;
     $("thinkText").value = prev.think_text || "";
     $("epiText").value = prev.episodic_memory_text || "";
     $("semText").value = prev.semantic_memory_text || "";
+    $("memory").textContent = clip.memory || "(vacío)";
 
-    document.querySelectorAll("#actionsA button").forEach((b) => {
-      b.classList.toggle("active", b.dataset.label === prev.label);
-    });
-    document.querySelectorAll("#actionsB button").forEach((b) => {
-      b.classList.toggle("active", b.dataset.choice === prev.choice);
-    });
-  }
-
-  function setH1A(label) {
-    const it = current();
-    store[it.item_id] = {
-      task: "h1a",
-      item_id: it.item_id,
-      clip_key: it.clip_key,
-      track: it.track,
-      annotator,
-      label,
-      text_only_guessable: $("textOnly").checked,
-      note: $("note").value.trim(),
-      ts: new Date().toISOString(),
-    };
-    scheduleSync();
-    render();
-  }
-
-  function setH1B(choice) {
-    const it = current();
-    const w = readWriteFields();
-    const prev = store[it.item_id] || {};
-    store[it.item_id] = {
-      ...prev,
-      task: "h1b",
-      item_id: it.item_id,
-      clip_key: it.clip_key,
-      track: it.track,
-      annotator,
-      think_text: w.think_text || prev.think_text || "",
-      episodic_memory_text: w.episodic_memory_text || prev.episodic_memory_text || "",
-      semantic_memory_text: w.semantic_memory_text || prev.semantic_memory_text || "",
-      choice,
-      note: $("note").value.trim(),
-      ts: new Date().toISOString(),
-    };
-    showQuestion = true;
-    scheduleSync();
-    render();
+    if (isA) {
+      showQuestions = true;
+      $("oracleMem").classList.remove("hidden");
+      $("questionPanel").classList.remove("hidden");
+      $("flagRow").classList.remove("hidden");
+      $("taskHint").textContent =
+        "Auditoría gold: un clip, memoria oracle, y las dos preguntas (epi + sem) con su gold.";
+      buildQuestionBlocks(clip);
+    } else {
+      $("writePanel").classList.remove("hidden");
+      $("taskHint").textContent =
+        "Baremo F4: un clip → textos opcionales compartidos → Mostrar preguntas (epi + sem). Al cambiar de clip se ocultan otra vez.";
+      syncToggleLabel();
+      if (showQuestions) {
+        $("questionPanel").classList.remove("hidden");
+        buildQuestionBlocks(clip);
+      } else {
+        $("questionPanel").innerHTML = "";
+      }
+    }
   }
 
   function toJsonl(records) {
@@ -307,9 +410,7 @@
 
   function downloadLocal() {
     const body = toJsonl(store);
-    const blob = new Blob([body + (body ? "\n" : "")], {
-      type: "application/x-ndjson",
-    });
+    const blob = new Blob([body + (body ? "\n" : "")], { type: "application/x-ndjson" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `annotations_${annotator}_${task}.jsonl`;
@@ -320,14 +421,13 @@
     if (pack) return pack;
     const res = await fetch(DATA_URL);
     if (!res.ok) {
-      alert("No se pudo cargar public/data/items.json — ejecuta export_h1_smoke_pack.py");
+      alert("No se pudo cargar public/data/items.json");
       return null;
     }
     pack = await res.json();
     return pack;
   }
 
-  /** One-time wipe of stale baremo F4 annotations (local + server replace for all annotators). */
   async function wipeBaremoF4IfNeeded() {
     if (localStorage.getItem(WIPE_FLAG)) return;
     store = {};
@@ -354,11 +454,8 @@
           const data = await res.json();
           if (!res.ok || !data.ok) throw new Error(data.error || res.status);
         } catch (e) {
-          console.warn("wipe h1b failed for", a, e);
-          setSyncUi(
-            `Wipe parcial: redeploy Worker con worker.js nuevo (replace). ${e.message || e}`,
-            "err"
-          );
+          console.warn("wipe failed", a, e);
+          setSyncUi(`Wipe: redeploy Worker (replace). ${e.message || e}`, "err");
         }
       }
     }
@@ -374,19 +471,17 @@
     const data = await ensurePack();
     if (!data) return;
     task = phase;
-    items = data[phase] || [];
-    if (!items.length) {
-      alert(`Sin ítems para ${phase}`);
+    clips = groupClips(data[phase] || []);
+    if (!clips.length) {
+      alert(`Sin clips para ${phase}`);
       return;
     }
 
     if (phase === "h1b") {
       await wipeBaremoF4IfNeeded();
       loadStoreLocal();
-      // After wipe, do not re-merge old remote unless wipe failed (empty store OK)
       if (API && Object.keys(store).length === 0 && localStorage.getItem(WIPE_FLAG)) {
-        // already wiped / empty — skip loading stale remote into UI
-        setSyncUi("Baremo F4 limpio (datos smoke antiguos descartados)", "ok");
+        setSyncUi("Baremo F4 limpio", "ok");
       } else if (API) {
         try {
           const remote = await apiLoad();
@@ -394,28 +489,25 @@
           saveStoreLocal();
           setSyncUi(`Servidor OK · ${Object.keys(store).length} ítems`, "ok");
         } catch (e) {
-          setSyncUi(`Sin servidor (${e.message}); usando local`, "err");
+          setSyncUi(`Sin servidor (${e.message})`, "err");
         }
       }
     } else {
       loadStoreLocal();
       if (API) {
-        setSyncUi("Cargando avance del servidor…", "pending");
         try {
           const remote = await apiLoad();
           store = mergeByTs(store, remote.records || {});
           saveStoreLocal();
           setSyncUi(`Servidor OK · ${Object.keys(store).length} ítems`, "ok");
         } catch (e) {
-          setSyncUi(`Sin servidor (${e.message}); usando local`, "err");
+          setSyncUi(`Sin servidor (${e.message})`, "err");
         }
-      } else {
-        setSyncUi("Sin API — solo este navegador", "off");
       }
     }
 
     idx = 0;
-    showQuestion = phase === "h1a";
+    showQuestions = phase === "h1a";
     login.classList.add("hidden");
     work.classList.remove("hidden");
     render();
@@ -424,18 +516,18 @@
   function goHome() {
     work.classList.add("hidden");
     login.classList.remove("hidden");
-    showQuestion = false;
+    showQuestions = false;
     pingStatus();
   }
 
   async function adminExport() {
     if (!API) {
-      alert("Configura apiBase en config.js");
+      alert("Configura apiBase");
       return;
     }
     const key = $("adminKey").value.trim();
     if (!key) {
-      alert("Introduce la clave admin");
+      alert("Clave admin");
       return;
     }
     $("adminMsg").textContent = "Exportando…";
@@ -443,9 +535,7 @@
       const res = await fetch(`${API}/api/export?key=${encodeURIComponent(key)}`);
       const data = await res.json();
       if (!res.ok || data.ok === false) throw new Error(data.error || res.status);
-      const blob = new Blob([JSON.stringify(data, null, 2)], {
-        type: "application/json",
-      });
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = `H1_export_${(data.exported_at || "").replace(/[:.]/g, "")}.json`;
@@ -467,18 +557,16 @@
   async function pingStatus() {
     const el = $("apiHint");
     if (!API) {
-      if (el) el.textContent = "API desactivada (solo localStorage).";
+      if (el) el.textContent = "API desactivada.";
       return;
     }
     try {
       const res = await fetch(`${API}/api/status`);
       const data = await res.json();
-      if (!res.ok) throw new Error(String(res.status));
       const total = (data.rows || []).reduce((s, r) => s + (r.n || 0), 0);
-      if (el) el.textContent = `API ${API} · ${total} anotaciones en servidor`;
-    } catch (e) {
-      if (el)
-        el.textContent = `API ${API} no responde — revisa Worker`;
+      if (el) el.textContent = `API ${API} · ${total} anotaciones`;
+    } catch {
+      if (el) el.textContent = `API ${API} no responde`;
     }
   }
 
@@ -488,52 +576,52 @@
   if ($("brandHome")) $("brandHome").onclick = goHome;
 
   $("btnToggleQuestion").onclick = () => {
-    showQuestion = !showQuestion;
-    if (task === "h1b") ensureH1BDraft();
+    showQuestions = !showQuestions;
+    if (task === "h1b") ensureClipDraft();
     render();
   };
 
   ["thinkText", "epiText", "semText"].forEach((id) => {
     $(id).addEventListener("change", () => {
-      if (task === "h1b") ensureH1BDraft();
+      if (task === "h1b") ensureClipDraft();
     });
   });
 
-  document.querySelectorAll("#actionsA button").forEach((b) => {
-    b.onclick = () => setH1A(b.dataset.label);
-  });
-  document.querySelectorAll("#actionsB button").forEach((b) => {
-    b.onclick = () => setH1B(b.dataset.choice);
-  });
-
   $("textOnly").onchange = () => {
-    const it = current();
-    if (!store[it.item_id] || task !== "h1a") return;
-    store[it.item_id].text_only_guessable = $("textOnly").checked;
-    store[it.item_id].ts = new Date().toISOString();
+    const clip = currentClip();
+    if (!clip || task !== "h1a") return;
+    tracksOf(clip).forEach((it) => {
+      if (!store[it.item_id]) return;
+      store[it.item_id].text_only_guessable = $("textOnly").checked;
+      store[it.item_id].ts = new Date().toISOString();
+    });
     scheduleSync();
   };
   $("note").onchange = () => {
-    const it = current();
-    if (!store[it.item_id]) return;
-    store[it.item_id].note = $("note").value.trim();
-    store[it.item_id].ts = new Date().toISOString();
-    scheduleSync();
-  };
-  $("btnPrev").onclick = () => {
-    if (task === "h1b") {
-      ensureH1BDraft();
-      showQuestion = false; // always hide question when changing item
+    if (task === "h1b") ensureClipDraft();
+    else {
+      const clip = currentClip();
+      if (!clip) return;
+      const note = $("note").value.trim();
+      tracksOf(clip).forEach((it) => {
+        if (!store[it.item_id]) return;
+        store[it.item_id].note = note;
+        store[it.item_id].ts = new Date().toISOString();
+      });
+      scheduleSync();
     }
+  };
+
+  $("btnPrev").onclick = () => {
+    if (task === "h1b") ensureClipDraft();
+    showQuestions = task === "h1a";
     idx = Math.max(0, idx - 1);
     render();
   };
   $("btnNext").onclick = () => {
-    if (task === "h1b") {
-      ensureH1BDraft();
-      showQuestion = false;
-    }
-    idx = Math.min(items.length - 1, idx + 1);
+    if (task === "h1b") ensureClipDraft();
+    showQuestions = task === "h1a";
+    idx = Math.min(clips.length - 1, idx + 1);
     render();
   };
   $("btnDownload").onclick = downloadLocal;

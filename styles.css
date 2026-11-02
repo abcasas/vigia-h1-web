@@ -326,8 +326,19 @@ button.secondary:hover {
 }
 .write-intro { margin-top: 0.65rem; }
 .write-nav { margin-top: 0.35rem; }
-.question-panel { margin-top: 0.5rem; }
-#btnBackWrite { margin: 0.65rem 0 0.25rem; }
+.question-panel { margin-top: 0.5rem; display: grid; gap: 0.85rem; }
+.q-block {
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.75);
+}
+.q-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.55rem;
+}
 .write-panel code,
 .prompt-box code {
   font-size: 0.82em;

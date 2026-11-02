@@ -4,13 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>VIGIA · Human evaluation (dataset tester)</title>
-  <link rel="stylesheet" href="styles.css?v=4" />
+  <link rel="stylesheet" href="styles.css?v=5" />
 </head>
 <body>
   <div class="shell">
     <header class="hero">
       <h1 class="brand" id="brandHome" title="Volver al inicio">VIGIA <span>Human evaluation</span></h1>
-      <p class="sub">Evaluación humana del dataset VIGIA-QA: baremo en 4 frames (como el modelo en train/eval) y auditoría del gold. El avance se guarda en el servidor.</p>
+      <p class="sub">Evaluación humana del dataset VIGIA-QA: baremo en 4 frames (como el modelo) y auditoría del gold. Un clip = preguntas epi + sem. El avance se guarda en el servidor.</p>
       <p id="apiHint" class="hint"></p>
     </header>
 
@@ -23,7 +23,7 @@
           <option value="abraham">Abraham Casas</option>
         </select>
       </label>
-      <p class="hint">Orden recomendado: primero el <strong>baremo F4</strong> (sin memoria oracle; textos opcionales → pregunta), después la <strong>auditoría gold F16</strong>. Clips disjuntos.</p>
+      <p class="hint">Orden: primero <strong>baremo F4</strong> (textos opcionales → ambas preguntas), después <strong>auditoría gold F16</strong>. Clips disjuntos entre fases.</p>
       <p id="syncStatus" class="sync" data-state="idle"></p>
       <div class="phase-pick">
         <button id="btnStartB" class="btn-primary" type="button">Baremo humano · 4 frames</button>
@@ -57,74 +57,58 @@
       <div id="frames" class="frames"></div>
 
       <div class="meta-row">
-        <span class="chip">Track <span id="track"></span></span>
         <span class="chip muted" id="ids"></span>
       </div>
 
-      <!-- Solo auditoría gold: memoria oracle M3 -->
+      <!-- Solo auditoría gold -->
       <div id="oracleMem" class="mem hidden">
         <div class="label">Memoria oracle M3 (solo auditoría gold)</div>
         <pre id="memory"></pre>
       </div>
 
-      <!-- Solo baremo F4: escritura opcional + prompt canónico -->
+      <!-- Solo baremo F4: escritura compartida del clip -->
       <div id="writePanel" class="write-panel hidden">
         <details class="prompt-box" open>
-          <summary>Train/eval contract (English · canonical <code>vigia_campana_limpia/prompts.py</code>)</summary>
+          <summary>Train/eval contract (English · <code>vigia_campana_limpia/prompts.py</code>)</summary>
           <pre id="contractPrompt" class="prompt-pre"></pre>
-          <p class="hint">Comment: today the checked-in campaign module is <strong>episodic</strong> (F4). Semantic track items use the same tag pattern with <code>&lt;semantic_memory&gt;</code> when dualized; there is no separate SEM system prompt in that file yet.</p>
+          <p class="hint">Comment: campaign module is episodic F4; semantic uses the same tag pattern with <code>&lt;semantic_memory&gt;</code>.</p>
         </details>
         <p class="hint write-intro">
-          Optional texts (may stay empty). Same idea as the VLM: <strong>no</strong> oracle M3 in the input; write reasoning/memory, then answer A/B.
+          Optional texts for this <strong>clip</strong> (shared by epi + sem). No oracle M3. Then show <strong>both</strong> questions.
         </p>
         <label class="field">Reasoning <code>&lt;think&gt;</code> (optional)
-          <textarea id="thinkText" rows="4" placeholder="Empty at start. Text inside &lt;think&gt;…&lt;/think&gt;"></textarea>
+          <textarea id="thinkText" rows="4" placeholder="Empty at start."></textarea>
         </label>
         <label class="field">Episodic memory <code>&lt;episodic_memory&gt;</code> (optional)
-          <textarea id="epiText" rows="4" placeholder="Chronological episodes visible in the frames…"></textarea>
+          <textarea id="epiText" rows="4" placeholder="Chronological episodes from the frames…"></textarea>
         </label>
         <label class="field">Semantic memory <code>&lt;semantic_memory&gt;</code> (optional)
           <textarea id="semText" rows="3" placeholder="Stable facts / relationships…"></textarea>
         </label>
         <div class="nav write-nav">
-          <button id="btnToggleQuestion" class="btn-primary" type="button">Mostrar pregunta</button>
+          <button id="btnToggleQuestion" class="btn-primary" type="button">Mostrar preguntas</button>
         </div>
       </div>
 
       <div id="questionPanel" class="question-panel hidden">
-        <div class="stmts">
-          <p class="stmt"><strong>A</strong> <span id="sa"></span></p>
-          <p class="stmt"><strong>B</strong> <span id="sb"></span></p>
-          <p id="goldRow" class="gold hidden">Gold del dataset: <strong id="gold"></strong></p>
-        </div>
-
-        <div id="actionsA" class="actions hidden">
-          <button data-label="gold_ok" type="button">Gold correcto</button>
-          <button data-label="gold_wrong" type="button">Gold incorrecto</button>
-          <button data-label="unsure" type="button">No estoy seguro</button>
-        </div>
-        <div id="actionsB" class="actions hidden">
-          <button data-choice="A" type="button">Elijo A</button>
-          <button data-choice="B" type="button">Elijo B</button>
-          <button data-choice="unsure" type="button">No estoy seguro</button>
-        </div>
+        <!-- filled by JS: one block per track -->
       </div>
 
       <label id="flagRow" class="flag hidden">
         <input type="checkbox" id="textOnly" />
-        <span>¿Se podría acertar solo con el texto, sin mirar los frames?</span>
+        <span>¿Se podría acertar solo con el texto, sin mirar los frames? (auditoría)</span>
       </label>
-      <label class="field">Nota (opcional)
+      <label class="field">Nota del clip (opcional)
         <input type="text" id="note" maxlength="200" placeholder="breve comentario…" />
       </label>
       <div class="nav">
-        <button id="btnPrev" type="button">Anterior</button>
-        <button id="btnNext" type="button">Siguiente</button>
+        <button id="btnPrev" type="button">Anterior clip</button>
+        <button id="btnNext" type="button">Siguiente clip</button>
       </div>
     </section>
   </div>
 
-  <script src="config.js?v=4"></script>
-  <script src="app.js?v=4"></script>
+  <script src="config.js?v=5"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
