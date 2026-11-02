@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>VIGIA · Human evaluation (dataset tester)</title>
-  <link rel="stylesheet" href="styles.css?v=6" />
+  <link rel="stylesheet" href="styles.css?v=7" />
 </head>
 <body>
   <div class="shell">
@@ -79,9 +79,9 @@
       <!-- Solo baremo F4: escritura compartida del clip -->
       <div id="writePanel" class="write-panel hidden">
         <details class="prompt-box" open>
-          <summary>Train/eval contract (English · <code>vigia_campana_limpia/prompts.py</code>)</summary>
+          <summary>Canonical contract (English · <code>qa_taxonomy.py</code> → train/eval + fábrica QA)</summary>
           <pre id="contractPrompt" class="prompt-pre"></pre>
-          <p class="hint">Comment: campaign module is episodic F4; semantic uses the same tag pattern with <code>&lt;semantic_memory&gt;</code>.</p>
+          <p class="hint">Misma glosa epi/sem y slots que la fábrica; el VLM no recibe los nombres de slot en el system (solo metadato).</p>
         </details>
         <p class="hint write-intro">
           Optional texts for this <strong>clip</strong> (shared by epi + sem). No oracle M3. Then show <strong>both</strong> questions.
@@ -118,7 +118,8 @@
     </section>
   </div>
 
-  <script src="config.js?v=6"></script>
-  <script src="app.js?v=6"></script>
+  <script src="config.js?v=7"></script>
+  <script src="contract.js?v=7"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

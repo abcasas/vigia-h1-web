@@ -26,26 +26,10 @@
     h1b: "Baremo humano · F4",
   };
 
-  const CONTRACT_PROMPT_F4 = [
-    "=== SYSTEM (SYSTEM_PROMPT_EPI_FULL) ===",
-    "You are an expert that watches a 30-second video clip from four key frames and answers one closed A/B contrastive question about episodic content.",
-    "",
-    "Output in ONE turn, in this order:",
-    "1. <think>...</think> — brief reasoning about the frames and the question.",
-    "2. <episodic_memory>...</episodic_memory> — chronological episodes (at least 10 characters).",
-    "3. Exactly one tag: <choice>A</choice> or <choice>B</choice>.",
-    "Do not output <choice_sem>, <choice_epi>, or a second <choice>.",
-    "Do not use video identifiers or filenames to invent content.",
-    "Do not call tools.",
-    "",
-    "=== USER scaffold (frames4) ===",
-    "Produce tagged episodic memory for this clip from the frames, then answer the question.",
-    "### Episodic contrastive question",
-    "<stem> / A) … / B) …",
-    "After memory, output <choice>A</choice> or <choice>B</choice>.",
-    "",
-    "Note: dual track uses the same frames; semantic answers use <semantic_memory> in the same spirit.",
-  ].join("\n");
+  // Fuente de verdad: vigia_campana_limpia/qa_taxonomy.py → h1_web/contract.js
+  const CONTRACT_PROMPT_F4 =
+    (typeof window !== "undefined" && window.H1_CONTRACT_TEXT) ||
+    "(contract.js missing — regenerate from qa_taxonomy.export_h1_contract_js)";
 
   const $ = (id) => document.getElementById(id);
   const login = $("login");
@@ -276,8 +260,12 @@
         : "Episodic";
       const block = document.createElement("div");
       block.className = "q-block";
+      const slot = it.type_slot || it.epi_type_slot || it.sem_type_slot || "";
+      const slotChip = slot
+        ? `<span class="chip muted" title="Factory QA slot">${escapeHtml(String(slot))}</span>`
+        : "";
       block.innerHTML = `
-        <div class="q-head"><span class="chip">${trackName}</span>
+        <div class="q-head"><span class="chip">${trackName}</span>${slotChip}
           <span class="chip muted">${it.item_id}</span></div>
         <div class="stmts">
           <p class="stmt"><strong>A</strong> ${escapeHtml(it.statement_a || "")}</p>
