@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>VIGIA H1 — auditoría gold + baremo humano</title>
-  <link rel="stylesheet" href="styles.css" />
+  <title>VIGIA · Human evaluation (dataset tester)</title>
+  <link rel="stylesheet" href="styles.css?v=3" />
 </head>
 <body>
   <div class="shell">
     <header class="hero">
-      <h1 class="brand">VIGIA <span>H1</span></h1>
-      <p class="sub">Auditoría del gold y baremo humano sobre clips VIGIA. Puedes salir y continuar: el avance se guarda en el servidor.</p>
+      <h1 class="brand" id="brandHome" title="Volver al inicio">VIGIA <span>Human evaluation</span></h1>
+      <p class="sub">Evaluación humana del dataset VIGIA-QA: baremo en 4 frames (como el modelo en train/eval) y auditoría del gold. El avance se guarda en el servidor.</p>
       <p id="apiHint" class="hint"></p>
     </header>
 
@@ -23,17 +23,17 @@
           <option value="abraham">Abraham Casas</option>
         </select>
       </label>
-      <p class="hint">Orden recomendado: primero <strong>H1-B</strong> (F4, escribir mem opcional → A/B), después <strong>H1-A</strong> (F16 + gold). Clips disjuntos.</p>
+      <p class="hint">Orden recomendado: primero el <strong>baremo F4</strong> (sin memoria oracle; textos opcionales → pregunta), después la <strong>auditoría gold F16</strong>. Clips disjuntos.</p>
       <p id="syncStatus" class="sync" data-state="idle"></p>
       <div class="phase-pick">
-        <button id="btnStartB" class="btn-primary" type="button">Continuar H1-B · baremo F4</button>
-        <button id="btnStartA" class="btn-soft" type="button">Continuar H1-A · audit F16</button>
+        <button id="btnStartB" class="btn-primary" type="button">Baremo humano · 4 frames</button>
+        <button id="btnStartA" class="btn-soft" type="button">Auditoría gold · 16 frames</button>
       </div>
     </section>
 
     <section id="admin" class="panel">
       <h2 class="h2">Admin</h2>
-      <p class="hint">Descarga el estado de los tres anotadores (JSON + JSONL). Solo Abraham.</p>
+      <p class="hint">Descarga el estado de los tres anotadores (JSON + JSONL).</p>
       <label class="field">Clave admin
         <input type="password" id="adminKey" placeholder="ADMIN_KEY" autocomplete="off" />
       </label>
@@ -47,7 +47,7 @@
         <span class="progress-actions">
           <button id="btnSyncNow" type="button" class="secondary">Sync</button>
           <button id="btnDownload" type="button" class="secondary">JSONL local</button>
-          <button id="btnHome" type="button" class="secondary">Cambiar fase</button>
+          <button id="btnHome" type="button" class="secondary">Inicio</button>
         </span>
       </div>
       <div class="bar" aria-hidden="true"><i id="progBar"></i></div>
@@ -61,26 +61,30 @@
         <span class="chip muted" id="ids"></span>
       </div>
 
-      <!-- H1-A: oracle memory visible for audit -->
+      <!-- Solo auditoría gold: memoria oracle M3 -->
       <div id="oracleMem" class="mem hidden">
-        <div class="label">Memoria (oracle M3 — solo audit H1-A)</div>
+        <div class="label">Memoria oracle M3 (solo auditoría gold)</div>
         <pre id="memory"></pre>
       </div>
 
-      <!-- H1-B: optional write phase (aligns with main F4: model writes tags) -->
+      <!-- Solo baremo F4: escritura opcional + prompt canónico -->
       <div id="writePanel" class="write-panel hidden">
+        <details class="prompt-box" open>
+          <summary>Train/eval contract (English · canonical <code>vigia_campana_limpia/prompts.py</code>)</summary>
+          <pre id="contractPrompt" class="prompt-pre"></pre>
+          <p class="hint">Comment: today the checked-in campaign module is <strong>episodic</strong> (F4). Semantic track items use the same tag pattern with <code>&lt;semantic_memory&gt;</code> when dualized; there is no separate SEM system prompt in that file yet.</p>
+        </details>
         <p class="hint write-intro">
-          Opcional — mismo contrato que train/eval F4: el modelo <strong>no</strong> ve memoria M3;
-          escribe razonamiento + memoria en tags y luego el choice. Puedes dejar vacío y pasar a la pregunta.
+          Optional texts (may stay empty). Same idea as the VLM: <strong>no</strong> oracle M3 in the input; write reasoning/memory, then answer A/B.
         </p>
-        <label class="field">Razonamiento <code>&lt;think&gt;</code> (opcional)
-          <textarea id="thinkText" rows="4" placeholder="Vacío al inicio. Texto que iría dentro de las etiquetas think."></textarea>
+        <label class="field">Reasoning <code>&lt;think&gt;</code> (optional)
+          <textarea id="thinkText" rows="4" placeholder="Empty at start. Text inside &lt;think&gt;…&lt;/think&gt;"></textarea>
         </label>
-        <label class="field">Memoria episódica <code>&lt;episodic_memory&gt;</code> (opcional)
-          <textarea id="epiText" rows="4" placeholder="Episodios cronológicos visibles en los frames…"></textarea>
+        <label class="field">Episodic memory <code>&lt;episodic_memory&gt;</code> (optional)
+          <textarea id="epiText" rows="4" placeholder="Chronological episodes visible in the frames…"></textarea>
         </label>
-        <label class="field">Memoria semántica <code>&lt;semantic_memory&gt;</code> (opcional)
-          <textarea id="semText" rows="3" placeholder="Hechos / relaciones estables…"></textarea>
+        <label class="field">Semantic memory <code>&lt;semantic_memory&gt;</code> (optional)
+          <textarea id="semText" rows="3" placeholder="Stable facts / relationships…"></textarea>
         </label>
         <div class="nav write-nav">
           <button id="btnToQuestion" class="btn-primary" type="button">Avanzar a la pregunta</button>
@@ -122,7 +126,7 @@
     </section>
   </div>
 
-  <script src="config.js"></script>
-  <script src="app.js"></script>
+  <script src="config.js?v=3"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>

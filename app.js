@@ -20,9 +20,44 @@
     abraham: "Abraham Casas",
   };
 
+  const TASK_LABELS = {
+    h1a: "Auditoría gold · F16",
+    h1b: "Baremo humano · F4",
+  };
+
+  // Canonical main F4 contract from vigia_campana_limpia/prompts.py (SYSTEM_PROMPT_EPI_FULL + frames4 user scaffold).
+  // Comment: that module is episodic today; semantic dual uses same tag slots with <semantic_memory>.
+  const CONTRACT_PROMPT_F4 = [
+    "=== SYSTEM (SYSTEM_PROMPT_EPI_FULL) ===",
+    "You are an expert that watches a 30-second video clip from four key frames and answers one closed A/B contrastive question about episodic content.",
+    "",
+    "Output in ONE turn, in this order:",
+    "1. <think>...</think> — brief reasoning about the frames and the question.",
+    "2. <episodic_memory>...</episodic_memory> — chronological episodes (at least 10 characters).",
+    "3. Exactly one tag: <choice>A</choice> or <choice>B</choice>.",
+    "Do not output <choice_sem>, <choice_epi>, or a second <choice>.",
+    "Do not use video identifiers or filenames to invent content.",
+    "Do not call tools.",
+    "",
+    "=== USER scaffold (frames4 · question text appears only after you advance) ===",
+    "Produce tagged episodic memory for this clip from the frames, then answer the question.",
+    "### Episodic contrastive question",
+    "<stem>",
+    "A) <statement_a>",
+    "B) <statement_b>",
+    "After memory, output <choice>A</choice> or <choice>B</choice>.",
+    "Do not output choice_sem.",
+  ].join("\n");
+
   const $ = (id) => document.getElementById(id);
   const login = $("login");
   const work = $("work");
+
+  function goHome() {
+    work.classList.add("hidden");
+    login.classList.remove("hidden");
+    pingStatus();
+  }
 
   function key() {
     return `vigia_${task}_${annotator}`;
@@ -144,6 +179,7 @@
   }
 
   function resolveH1bPhase(prev) {
+    // Only show the question after explicit "Avanzar" (ui_phase) or if already answered.
     if (prev && prev.ui_phase === "answer") return "answer";
     if (prev && prev.choice) return "answer";
     return "write";
@@ -156,8 +192,9 @@
     const done = Object.keys(store).length;
     const prev = store[it.item_id] || {};
     const isA = task === "h1a";
+    const taskLabel = TASK_LABELS[task] || task;
 
-    $("prog").textContent = `${task.toUpperCase()} · ${idx + 1} / ${items.length} · ${name} · ${done} guardados`;
+    $("prog").textContent = `${taskLabel} · ${idx + 1} / ${items.length} · ${name} · ${done} guardados`;
     const bar = $("progBar");
     if (bar && items.length) {
       bar.style.width = `${Math.round(((idx + 1) / items.length) * 100)}%`;
@@ -168,33 +205,42 @@
     $("sa").textContent = it.statement_a;
     $("sb").textContent = it.statement_b;
 
+    const cp = $("contractPrompt");
+    if (cp) cp.textContent = CONTRACT_PROMPT_F4;
+
+    // Default: hide write/oracle/question; then open only what this task needs.
+    $("oracleMem").classList.add("hidden");
+    $("writePanel").classList.add("hidden");
+    $("questionPanel").classList.add("hidden");
+    $("btnBackWrite").classList.add("hidden");
+    $("actionsA").classList.add("hidden");
+    $("actionsB").classList.add("hidden");
+    $("goldRow").classList.add("hidden");
+    $("flagRow").classList.add("hidden");
+
     if (isA) {
+      // Gold audit only: frames + oracle mem + A/B statements + gold labels. NO write panel.
       h1bPhase = "answer";
       $("oracleMem").classList.remove("hidden");
-      $("writePanel").classList.add("hidden");
       $("questionPanel").classList.remove("hidden");
-      $("btnBackWrite").classList.add("hidden");
-      $("goldRow").classList.remove("hidden");
       $("actionsA").classList.remove("hidden");
-      $("actionsB").classList.add("hidden");
+      $("goldRow").classList.remove("hidden");
       $("flagRow").classList.remove("hidden");
       $("gold").textContent = it.gold;
       $("taskHint").textContent =
-        "H1-A: con 16 frames + memoria oracle, ¿el gold es correcto? (auditoría del dato).";
+        "Auditoría gold: 16 frames + memoria oracle. ¿El gold del dataset es correcto?";
     } else {
       h1bPhase = resolveH1bPhase(prev);
-      $("oracleMem").classList.add("hidden");
-      $("goldRow").classList.add("hidden");
-      $("actionsA").classList.add("hidden");
-      $("flagRow").classList.add("hidden");
-      $("actionsB").classList.remove("hidden");
       $("taskHint").textContent =
-        "H1-B (main F4): sin memoria M3. Opcional: escribe think / epi / sem (vacío OK) → Avanzar → elige A/B. Se guarda todo.";
+        "Baremo F4 (como train/eval main): sin memoria oracle. Textos opcionales → Avanzar → A/B.";
 
-      const showWrite = h1bPhase === "write";
-      $("writePanel").classList.toggle("hidden", !showWrite);
-      $("questionPanel").classList.toggle("hidden", showWrite);
-      $("btnBackWrite").classList.toggle("hidden", showWrite);
+      if (h1bPhase === "write") {
+        $("writePanel").classList.remove("hidden");
+      } else {
+        $("questionPanel").classList.remove("hidden");
+        $("actionsB").classList.remove("hidden");
+        $("btnBackWrite").classList.remove("hidden");
+      }
     }
 
     const fr = $("frames");
@@ -393,11 +439,8 @@
 
   $("btnStartA").onclick = () => start("h1a");
   $("btnStartB").onclick = () => start("h1b");
-  $("btnHome").onclick = () => {
-    work.classList.add("hidden");
-    login.classList.remove("hidden");
-    pingStatus();
-  };
+  $("btnHome").onclick = goHome;
+  if ($("brandHome")) $("brandHome").onclick = goHome;
 
   $("btnToQuestion").onclick = () => {
     h1bPhase = "answer";

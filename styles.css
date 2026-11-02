@@ -52,7 +52,10 @@ body {
   letter-spacing: -0.02em;
   margin: 0 0 0.35rem;
   line-height: 1.15;
+  cursor: pointer;
+  user-select: none;
 }
+.brand:hover span { text-decoration: underline; }
 .brand span {
   color: var(--accent);
   font-weight: 500;
@@ -90,7 +93,9 @@ body {
 }
 .panel:nth-of-type(2) { animation-delay: 0.06s; }
 .panel:nth-of-type(3) { animation-delay: 0.12s; }
-.panel.hidden { display: none; }
+/* Generic hide — required for write/question/oracle panels */
+.hidden { display: none !important; }
+.panel.hidden { display: none !important; }
 
 .h2 {
   font-family: var(--display);
@@ -319,15 +324,40 @@ button.secondary:hover {
   border: 1px dashed rgba(13, 115, 119, 0.35);
   background: rgba(13, 115, 119, 0.04);
 }
-.write-intro { margin-top: 0; }
+.write-intro { margin-top: 0.65rem; }
 .write-nav { margin-top: 0.35rem; }
 .question-panel { margin-top: 0.5rem; }
 #btnBackWrite { margin: 0.65rem 0 0.25rem; }
-.write-panel code {
+.write-panel code,
+.prompt-box code {
   font-size: 0.82em;
   background: rgba(21, 32, 43, 0.06);
   padding: 0.05em 0.3em;
   border-radius: 4px;
+}
+.prompt-box {
+  margin: 0 0 0.5rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--line);
+}
+.prompt-box summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+.prompt-pre {
+  margin: 0.55rem 0 0.35rem;
+  white-space: pre-wrap;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  max-height: 14rem;
+  overflow: auto;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(21, 32, 43, 0.05);
 }
 
 .stmts {
