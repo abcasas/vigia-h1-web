@@ -141,6 +141,16 @@ export default {
     const path = url.pathname;
 
     try {
+      // Deploy fingerprint — open /api/version tras redeploy CF para confirmar putDoc-retry.
+      if (request.method === "GET" && (path === "/api/version" || path === "/version")) {
+        return json({
+          ok: true,
+          worker: "vigia-h1-sync",
+          build: "2026-11-05-409retry",
+          features: ["wipe", "putDoc-retry", "save-merge"],
+        });
+      }
+
       if (request.method === "GET" && (path === "/api/status" || path === "/status")) {
         const rows = [];
         for (const a of ANNOTATORS) {
