@@ -75,7 +75,9 @@ async function ghPut(env, path, contentObj, sha) {
   );
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(`PUT ${path}: ${res.status} ${t}`);
+    const err = new Error(`PUT ${path}: ${res.status} ${t}`);
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -94,6 +96,40 @@ async function loadDoc(env, annotator, task) {
   }
   const text = decodeURIComponent(escape(atob(meta.content.replace(/\n/g, ""))));
   return { doc: JSON.parse(text), sha: meta.sha };
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Write with optimistic concurrency. GitHub Contents API returns 409 when the
+ * blob SHA changed between GET and PUT (concurrent saves / double tabs).
+ * Re-load + re-merge and retry instead of failing the annotator.
+ */
+async function putDoc(env, annotator, task, records, { replace = false, maxAttempts = 6 } = {}) {
+  const path = filePath(annotator, task);
+  let lastErr;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const { doc, sha } = await loadDoc(env, annotator, task);
+    const merged = replace ? { ...records } : mergeRecords(doc.records || {}, records);
+    const next = {
+      annotator,
+      task,
+      records: merged,
+      updated_at: nowIso(),
+    };
+    try {
+      await ghPut(env, path, next, sha);
+      return next;
+    } catch (e) {
+      lastErr = e;
+      const conflict = e.status === 409 || String(e.message || "").includes(" 409 ");
+      if (!conflict || attempt === maxAttempts - 1) throw e;
+      await sleep(40 * (attempt + 1) + Math.floor(Math.random() * 40));
+    }
+  }
+  throw lastErr;
 }
 
 export default {
@@ -169,21 +205,13 @@ export default {
         if (!ANNOTATORS.has(a) || !TASKS.has(t) || typeof records !== "object" || records === null) {
           return json({ ok: false, error: "annotator/task/records inválidos" }, 400);
         }
-        const { doc, sha } = await loadDoc(env, a, t);
         // replace=true → full overwrite (used to wipe stale smoke annotations)
-        const merged = replace ? { ...records } : mergeRecords(doc.records || {}, records);
-        const next = {
-          annotator: a,
-          task: t,
-          records: merged,
-          updated_at: nowIso(),
-        };
-        await ghPut(env, filePath(a, t), next, sha);
+        const next = await putDoc(env, a, t, records, { replace });
         return json({
           ok: true,
           annotator: a,
           task: t,
-          n_items: Object.keys(merged).length,
+          n_items: Object.keys(next.records || {}).length,
           updated_at: next.updated_at,
           replaced: replace,
         });
@@ -206,14 +234,7 @@ export default {
         const cleared = [];
         for (const a of ANNOTATORS) {
           for (const t of tasks) {
-            const { sha } = await loadDoc(env, a, t);
-            const next = {
-              annotator: a,
-              task: t,
-              records: {},
-              updated_at: nowIso(),
-            };
-            await ghPut(env, filePath(a, t), next, sha);
+            await putDoc(env, a, t, {}, { replace: true });
             cleared.push(`${a}_${t}`);
           }
         }

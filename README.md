@@ -31,7 +31,10 @@ python -m http.server 8765
 
 ## Producción (Pages + Worker)
 
-Paso a paso completo: **[DEPLOY_GITHUB.md](DEPLOY_GITHUB.md)** (repo anotaciones → Worker → Pages → admin export).  
+- Canónico: **esta carpeta** `h1_web/`.
+- Pages: clone `D:\Analisis de datos\vigia-h1-web` (no editar ahí primero).
+- Sync: `powershell -File scripts/h1_web/sync_to_pages.ps1` (`-Push`, `-DeployWorker`).
+- Guía: **[DEPLOY_GITHUB.md](DEPLOY_GITHUB.md)** · skill: `.cursor/skills/h1-web-deploy/`.  
 Detalle Worker: `worker/README.md`.
 
 ## Export pack de ítems

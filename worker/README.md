@@ -2,13 +2,19 @@
 
 **GitHub Pages no guarda datos.** El Worker escribe en un repo (privado) vía GitHub API.
 
-## Deploy rápido
+## Deploy / redeploy
+
+```bash
+cd h1_web/worker
+npx wrangler deploy
+```
+
+(o pegar `worker.js` en dashboard Cloudflare → Deploy). Secrets ya existentes se conservan.
 
 1. Repo privado p.ej. `abcasas/vigia-h1-annotations` con carpeta `annotations/sync/`.
 2. Fine-grained PAT: `contents: write` solo en ese repo.
-3. `npx wrangler deploy` desde esta carpeta (o pegar `worker.js` en dashboard Cloudflare).
-4. Secrets: `GITHUB_TOKEN`, `ADMIN_KEY`, `GITHUB_REPO=owner/name`, `GITHUB_BRANCH=main`.
-5. En `h1_web/config.js` (o Pages):
+3. Secrets: `GITHUB_TOKEN`, `ADMIN_KEY`, `GITHUB_REPO=owner/name`, `GITHUB_BRANCH=main`.
+4. En `h1_web/config.js` (o Pages):
 
 ```js
 window.H1_CONFIG = { apiBase: "https://vigia-h1-sync.<tu>.workers.dev" };

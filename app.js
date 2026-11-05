@@ -14,6 +14,10 @@
   let store = {};
   let showQuestions = false;
   let syncTimer = null;
+  let saveBusy = false;
+  let saveQueued = false;
+  let saveQueuedOpts = {};
+  let saveConflictRetries = 0;
 
   const ANNOTATOR_LABELS = {
     luis: "Luis de la Ossa",
@@ -131,6 +135,15 @@
       setSyncUi("Solo localStorage (sin API)", "off");
       return;
     }
+    // Serialize: overlapping saves (typing + Sync / two tabs) race on GitHub SHA → 409.
+    if (saveBusy) {
+      saveQueued = true;
+      saveQueuedOpts = {
+        replace: !!(opts.replace || saveQueuedOpts.replace),
+      };
+      return;
+    }
+    saveBusy = true;
     const replace = !!opts.replace;
     setSyncUi(replace ? "Limpiando servidor…" : "Guardando…", "pending");
     try {
@@ -147,9 +160,28 @@
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || res.status);
+      saveConflictRetries = 0;
       setSyncUi(`Sincronizado · ${data.n_items} ítems`, "ok");
     } catch (e) {
-      setSyncUi(`Error sync: ${e.message || e}`, "err");
+      const msg = String(e.message || e);
+      if (msg.includes("409") && saveConflictRetries < 3) {
+        saveConflictRetries += 1;
+        setSyncUi(`Conflicto de sync (reintento ${saveConflictRetries}/3)…`, "pending");
+        saveQueued = true;
+        saveQueuedOpts = { replace: replace || !!saveQueuedOpts.replace };
+      } else {
+        saveConflictRetries = 0;
+        setSyncUi(`Error sync: ${msg}`, "err");
+      }
+    } finally {
+      saveBusy = false;
+      if (saveQueued) {
+        const q = saveQueuedOpts;
+        saveQueued = false;
+        saveQueuedOpts = {};
+        await new Promise((r) => setTimeout(r, 200));
+        await apiSave(q);
+      }
     }
   }
 
@@ -161,7 +193,8 @@
     }
     setSyncUi("Pendiente de sync…", "pending");
     clearTimeout(syncTimer);
-    syncTimer = setTimeout(() => apiSave(), 450);
+    // Slightly longer debounce: GitHub Contents PUT often >450ms → fewer races.
+    syncTimer = setTimeout(() => apiSave(), 700);
   }
 
   function readWriteFields() {

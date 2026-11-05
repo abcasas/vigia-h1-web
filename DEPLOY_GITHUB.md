@@ -2,12 +2,33 @@
 
 GitHub Pages **solo sirve la UI** (HTML/JS/JPEG). Las anotaciones las guarda un **Cloudflare Worker** que escribe en un **repo privado** vía API. Sin el Worker, los anotadores solo tendrían `localStorage` en su navegador.
 
+## Mapa de repos (no duplicar staging)
+
+| Rol | Dónde |
+|-----|--------|
+| **Canónico (editar)** | `01_Articulo/code/h1_web/` (este árbol) |
+| **Pages live** | clone `D:\Analisis de datos\vigia-h1-web` → https://github.com/abcasas/vigia-h1-web → https://abcasas.github.io/vigia-h1-web/ |
+| **Worker** | Cloudflare `vigia-h1-sync` (código canónico: `h1_web/worker/`) |
+| **Anotaciones** | repo privado `vigia-h1-annotations` |
+
+**No usar** `h1_web_pages_dist/` (eliminado; era un pack intermedio desfasado).
+
+Sync canónico → Pages (+ opc. push / wrangler):
+
+```powershell
+cd 01_Articulo/code
+powershell -File scripts/h1_web/sync_to_pages.ps1
+# powershell -File scripts/h1_web/sync_to_pages.ps1 -Push -DeployWorker
 ```
-[Directores] → GitHub Pages (h1_web/)
+
+Skill Cursor: `.cursor/skills/h1-web-deploy/SKILL.md`.
+
+```
+[Anotadores] → GitHub Pages (vigia-h1-web)
                     │
                     │  POST /api/save  ·  GET /api/load  ·  GET /api/export
                     ▼
-            Cloudflare Worker
+            Cloudflare Worker (vigia-h1-sync)
                     │
                     ▼
      Repo privado annotations/sync/*.json
@@ -155,7 +176,28 @@ python scripts/h1_web/h1_aggregate.py \
 
 ---
 
-## 7) Desarrollo local (sin Pages)
+## 7) Redeploy (cuando cambias código)
+
+**Worker (fix 409 / sync)** — obligatorio tras editar `worker/worker.js`:
+
+```bash
+cd h1_web/worker
+npx wrangler deploy
+```
+
+O en Cloudflare Dashboard → Workers → `vigia-h1-sync` → editar código → **Deploy**. Los secrets (`GITHUB_TOKEN`, `ADMIN_KEY`, …) no hace falta volver a ponerlos.
+
+**UI (Pages)** — tras editar `app.js` / `index.html` / `config.js` / `public/`:
+
+1. Commit + push al repo/branch que alimenta GitHub Pages.
+2. Esperar el Action/deploy de Pages (o Settings → Pages → ver último deploy).
+3. Hard refresh en el navegador (`Ctrl+F5`) para no usar JS cacheado.
+
+Si solo cambió el Worker, **no** hace falta redeploy de Pages.
+
+---
+
+## 8) Desarrollo local (sin Pages)
 
 ```bash
 # Terminal 1
