@@ -3,6 +3,7 @@
   const CFG = window.H1_CONFIG || {};
   const API = (CFG.apiBase || "").replace(/\/$/, "");
   const STORE_VER = "v3";
+  /** Legacy one-shot wipe flag (no longer auto-wipes server). Cleared on admin wipe. */
   const WIPE_FLAG = "vigia_baremo_f4_wiped_v3";
 
   let pack = null;
@@ -64,11 +65,20 @@
     localStorage.setItem(key(), JSON.stringify(store));
   }
 
+  /** Same rule as Worker: newer ts wins keys; older fills omitted fields (compat). */
   function mergeByTs(a, b) {
     const out = { ...a };
     Object.entries(b || {}).forEach(([iid, row]) => {
+      if (!row || typeof row !== "object") return;
       const prev = out[iid];
-      if (!prev || String(row.ts || "") >= String(prev.ts || "")) out[iid] = row;
+      if (!prev || typeof prev !== "object") {
+        out[iid] = { ...row };
+        return;
+      }
+      const rowNewer = String(row.ts || "") >= String(prev.ts || "");
+      const newer = rowNewer ? row : prev;
+      const older = rowNewer ? prev : row;
+      out[iid] = { ...older, ...newer };
     });
     return out;
   }
@@ -449,38 +459,32 @@
     return pack;
   }
 
-  async function wipeBaremoF4IfNeeded() {
-    if (localStorage.getItem(WIPE_FLAG)) return;
-    store = {};
-    saveStoreLocal();
+  /** Drop only ancient localStorage keys; never touch the server. */
+  function scrubLegacyLocalKeys() {
     ["luis", "jesus", "abraham"].forEach((a) => {
-      try {
-        localStorage.removeItem(`vigia_h1b_${a}`);
-        localStorage.removeItem(`vigia_v2_h1b_${a}`);
-      } catch (_) {}
-    });
-    if (API) {
-      for (const a of ["luis", "jesus", "abraham"]) {
+      ["h1a", "h1b"].forEach((t) => {
         try {
-          const res = await fetch(`${API}/api/save`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              annotator: a,
-              task: "h1b",
-              records: {},
-              replace: true,
-            }),
-          });
-          const data = await res.json();
-          if (!res.ok || !data.ok) throw new Error(data.error || res.status);
-        } catch (e) {
-          console.warn("wipe failed", a, e);
-          setSyncUi(`Wipe: redeploy Worker (replace). ${e.message || e}`, "err");
-        }
-      }
+          localStorage.removeItem(`vigia_${t}_${a}`);
+          localStorage.removeItem(`vigia_v2_${t}_${a}`);
+        } catch (_) {}
+      });
+    });
+  }
+
+  async function hydrateFromServer() {
+    loadStoreLocal();
+    if (!API) {
+      setSyncUi("Solo localStorage", "off");
+      return;
     }
-    localStorage.setItem(WIPE_FLAG, new Date().toISOString());
+    try {
+      const remote = await apiLoad();
+      store = mergeByTs(store, remote.records || {});
+      saveStoreLocal();
+      setSyncUi(`Servidor OK · ${Object.keys(store).length} ítems`, "ok");
+    } catch (e) {
+      setSyncUi(`Sin servidor (${e.message}) · usando local`, "err");
+    }
   }
 
   async function start(phase) {
@@ -498,34 +502,8 @@
       return;
     }
 
-    if (phase === "h1b") {
-      await wipeBaremoF4IfNeeded();
-      loadStoreLocal();
-      if (API && Object.keys(store).length === 0 && localStorage.getItem(WIPE_FLAG)) {
-        setSyncUi("Baremo F4 limpio", "ok");
-      } else if (API) {
-        try {
-          const remote = await apiLoad();
-          store = mergeByTs(store, remote.records || {});
-          saveStoreLocal();
-          setSyncUi(`Servidor OK · ${Object.keys(store).length} ítems`, "ok");
-        } catch (e) {
-          setSyncUi(`Sin servidor (${e.message})`, "err");
-        }
-      }
-    } else {
-      loadStoreLocal();
-      if (API) {
-        try {
-          const remote = await apiLoad();
-          store = mergeByTs(store, remote.records || {});
-          saveStoreLocal();
-          setSyncUi(`Servidor OK · ${Object.keys(store).length} ítems`, "ok");
-        } catch (e) {
-          setSyncUi(`Sin servidor (${e.message})`, "err");
-        }
-      }
-    }
+    scrubLegacyLocalKeys();
+    await hydrateFromServer();
 
     idx = 0;
     showQuestions = phase === "h1a";

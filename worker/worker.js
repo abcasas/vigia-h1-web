@@ -26,11 +26,24 @@ function nowIso() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
+/**
+ * Merge by item_id. Newer `ts` wins on overlapping keys; the older row fills
+ * keys the newer payload omitted (draft sync must not erase choice/label).
+ * Unknown future fields are kept via object spread.
+ */
 function mergeRecords(existing, incoming) {
   const out = { ...existing };
   for (const [iid, row] of Object.entries(incoming || {})) {
+    if (!row || typeof row !== "object") continue;
     const prev = out[iid];
-    if (!prev || String(row.ts || "") >= String(prev.ts || "")) out[iid] = row;
+    if (!prev || typeof prev !== "object") {
+      out[iid] = { ...row };
+      continue;
+    }
+    const rowNewer = String(row.ts || "") >= String(prev.ts || "");
+    const newer = rowNewer ? row : prev;
+    const older = rowNewer ? prev : row;
+    out[iid] = { ...older, ...newer };
   }
   return out;
 }
@@ -113,11 +126,14 @@ async function putDoc(env, annotator, task, records, { replace = false, maxAttem
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const { doc, sha } = await loadDoc(env, annotator, task);
     const merged = replace ? { ...records } : mergeRecords(doc.records || {}, records);
+    // Preserve unknown envelope keys; schema_version defaults for pre-v1 docs.
     const next = {
+      ...doc,
       annotator,
       task,
       records: merged,
       updated_at: nowIso(),
+      schema_version: Number(doc.schema_version) > 0 ? Number(doc.schema_version) : 1,
     };
     try {
       await ghPut(env, path, next, sha);
@@ -146,8 +162,8 @@ export default {
         return json({
           ok: true,
           worker: "vigia-h1-sync",
-          build: "2026-11-05-409retry",
-          features: ["wipe", "putDoc-retry", "save-merge"],
+          build: "2026-11-05-compat-merge",
+          features: ["wipe", "putDoc-retry", "field-merge", "schema_version"],
         });
       }
 
