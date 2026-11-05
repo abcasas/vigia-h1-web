@@ -26,6 +26,13 @@ function nowIso() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
+/** Compare annotation timestamps; Date.parse avoids `…56.345Z` < `…56Z` lexical bugs. */
+function tsMs(ts) {
+  if (!ts) return 0;
+  const n = Date.parse(String(ts));
+  return Number.isFinite(n) ? n : 0;
+}
+
 /**
  * Merge by item_id. Newer `ts` wins on overlapping keys; the older row fills
  * keys the newer payload omitted (draft sync must not erase choice/label).
@@ -34,13 +41,13 @@ function nowIso() {
 function mergeRecords(existing, incoming) {
   const out = { ...existing };
   for (const [iid, row] of Object.entries(incoming || {})) {
-    if (!row || typeof row !== "object") continue;
+    if (!row || typeof row !== "object" || Array.isArray(row)) continue;
     const prev = out[iid];
-    if (!prev || typeof prev !== "object") {
+    if (!prev || typeof prev !== "object" || Array.isArray(prev)) {
       out[iid] = { ...row };
       continue;
     }
-    const rowNewer = String(row.ts || "") >= String(prev.ts || "");
+    const rowNewer = tsMs(row.ts) >= tsMs(prev.ts);
     const newer = rowNewer ? row : prev;
     const older = rowNewer ? prev : row;
     out[iid] = { ...older, ...newer };
@@ -162,8 +169,8 @@ export default {
         return json({
           ok: true,
           worker: "vigia-h1-sync",
-          build: "2026-11-05-compat-merge",
-          features: ["wipe", "putDoc-retry", "field-merge", "schema_version"],
+          build: "2026-11-05-audit1",
+          features: ["wipe", "putDoc-retry", "field-merge", "schema_version", "replace-admin"],
         });
       }
 
@@ -228,10 +235,22 @@ export default {
         const t = String(body.task || "");
         const records = body.records;
         const replace = !!body.replace;
-        if (!ANNOTATORS.has(a) || !TASKS.has(t) || typeof records !== "object" || records === null) {
+        if (
+          !ANNOTATORS.has(a) ||
+          !TASKS.has(t) ||
+          typeof records !== "object" ||
+          records === null ||
+          Array.isArray(records)
+        ) {
           return json({ ok: false, error: "annotator/task/records inválidos" }, 400);
         }
-        // replace=true → full overwrite (used to wipe stale smoke annotations)
+        // replace=true is destructive — admin only (UI wipe uses /api/wipe)
+        if (replace) {
+          const key = body.key || request.headers.get("X-Admin-Key") || "";
+          if (key !== env.ADMIN_KEY) {
+            return json({ ok: false, error: "replace requiere admin key" }, 403);
+          }
+        }
         const next = await putDoc(env, a, t, records, { replace });
         return json({
           ok: true,
@@ -240,6 +259,8 @@ export default {
           n_items: Object.keys(next.records || {}).length,
           updated_at: next.updated_at,
           replaced: replace,
+          records: next.records,
+          schema_version: next.schema_version,
         });
       }
 

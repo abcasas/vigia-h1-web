@@ -1,10 +1,16 @@
 (() => {
-  const DATA_URL = "public/data/items.json";
+  const DATA_URL = "public/data/items.json?v=10";
   const CFG = window.H1_CONFIG || {};
   const API = (CFG.apiBase || "").replace(/\/$/, "");
   const STORE_VER = "v3";
   /** Legacy one-shot wipe flag (no longer auto-wipes server). Cleared on admin wipe. */
   const WIPE_FLAG = "vigia_baremo_f4_wiped_v3";
+
+  function tsMs(ts) {
+    if (!ts) return 0;
+    const n = Date.parse(String(ts));
+    return Number.isFinite(n) ? n : 0;
+  }
 
   let pack = null;
   /** @type {{clip_key:string, video_id:string, clip_id:any, scene:string, frames:string[], memory:string, epi:object|null, sem:object|null}[]} */
@@ -69,13 +75,13 @@
   function mergeByTs(a, b) {
     const out = { ...a };
     Object.entries(b || {}).forEach(([iid, row]) => {
-      if (!row || typeof row !== "object") return;
+      if (!row || typeof row !== "object" || Array.isArray(row)) return;
       const prev = out[iid];
-      if (!prev || typeof prev !== "object") {
+      if (!prev || typeof prev !== "object" || Array.isArray(prev)) {
         out[iid] = { ...row };
         return;
       }
-      const rowNewer = String(row.ts || "") >= String(prev.ts || "");
+      const rowNewer = tsMs(row.ts) >= tsMs(prev.ts);
       const newer = rowNewer ? row : prev;
       const older = rowNewer ? prev : row;
       out[iid] = { ...older, ...newer };
@@ -170,6 +176,11 @@
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || res.status);
+      // Adopt server merge (other tab / field-fill) so local doesn't drift.
+      if (data.records && typeof data.records === "object") {
+        store = mergeByTs(store, data.records);
+        saveStoreLocal();
+      }
       saveConflictRetries = 0;
       setSyncUi(`Sincronizado · ${data.n_items} ítems`, "ok");
     } catch (e) {
@@ -266,8 +277,24 @@
       note: w.note,
       ts: new Date().toISOString(),
     };
-    // keep sibling draft texts in sync
-    ensureClipDraft();
+    // Sibling texts only (ensureClipDraft would bump ts twice / double-schedule).
+    tracksOf(clip).forEach((sib) => {
+      if (sib.item_id === itemId) return;
+      const sp = store[sib.item_id] || {};
+      store[sib.item_id] = {
+        ...sp,
+        task: "h1b",
+        item_id: sib.item_id,
+        clip_key: clip.clip_key,
+        track: sib.track,
+        annotator,
+        think_text: w.think_text || sp.think_text || "",
+        episodic_memory_text: w.episodic_memory_text || sp.episodic_memory_text || "",
+        semantic_memory_text: w.semantic_memory_text || sp.semantic_memory_text || "",
+        note: w.note,
+        ts: new Date().toISOString(),
+      };
+    });
     scheduleSync();
     render();
   }
@@ -512,7 +539,41 @@
     render();
   }
 
-  function goHome() {
+  async function flushPendingSync() {
+    clearTimeout(syncTimer);
+    syncTimer = null;
+    if (task === "h1b") {
+      // Persist current textareas without relying on blur/`change`.
+      const clip = currentClip();
+      if (clip) {
+        const w = readWriteFields();
+        const ts = new Date().toISOString();
+        tracksOf(clip).forEach((it) => {
+          const prev = store[it.item_id] || {};
+          store[it.item_id] = {
+            ...prev,
+            task: "h1b",
+            item_id: it.item_id,
+            clip_key: clip.clip_key,
+            track: it.track,
+            annotator,
+            think_text: w.think_text,
+            episodic_memory_text: w.episodic_memory_text,
+            semantic_memory_text: w.semantic_memory_text,
+            note: w.note,
+            ts,
+          };
+        });
+        saveStoreLocal();
+      }
+    }
+    if (API && annotator && task) await apiSave();
+  }
+
+  async function goHome() {
+    try {
+      await flushPendingSync();
+    } catch (_) {}
     work.classList.add("hidden");
     login.classList.remove("hidden");
     showQuestions = false;
@@ -531,7 +592,10 @@
     }
     $("adminMsg").textContent = "Exportando…";
     try {
-      const res = await fetch(`${API}/api/export?key=${encodeURIComponent(key)}`);
+      // Prefer header (avoids key in URL / server access logs)
+      const res = await fetch(`${API}/api/export`, {
+        headers: { "X-Admin-Key": key },
+      });
       const data = await res.json();
       if (!res.ok || data.ok === false) throw new Error(data.error || res.status);
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -689,6 +753,19 @@
   }
 
   if ($("btnAdminWipe")) $("btnAdminWipe").onclick = adminWipe;
+
+  window.addEventListener("beforeunload", () => {
+    try {
+      saveStoreLocal();
+    } catch (_) {}
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden" && annotator && task) {
+      try {
+        saveStoreLocal();
+      } catch (_) {}
+    }
+  });
 
   pingStatus();
 })();
